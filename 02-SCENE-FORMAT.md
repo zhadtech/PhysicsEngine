@@ -140,7 +140,7 @@ Physics realizations name the Rapier building blocks; the exact force formulas, 
 |---|---|---|---|---|
 | `gear` [dyn] | Rotating disc, optionally motorized. Pinned to the background at its center. | Dynamic disc + revolute joint to world; optional motor. Tooth geometry is visual in v1 — gear coupling uses `gearMesh` links. | Center; `rot` sets tooth phase (visual). | `r` (def 0.1, 0.02–1), `motorSpeed` (def 0 = free-spinning, −3600–3600 deg/s), `maxTorque` (def 0.5 N·m, 0–100). Defaults: density 6, friction 0.6, restitution 0.05 |
 | `lever` [dyn] | Plank on a fulcrum (seesaw = pivot 0.5). | Plank body + revolute joint to world at the pivot point. | Pivot point; `rot` = arm angle. | `len` (def 0.4, 0.05–4), `h` (def 0.02), `pivot` (def 0.5, 0–1, fraction from left end), `minAngle`/`maxAngle` (deg, optional rotation limits). Defaults: density 5, friction 0.5, restitution 0.1 |
-| `spring` [dyn] | Compressible launcher pad (springboard/kicker). | Static base + plate on a prismatic joint with spring stiffness and damping. | Base center; `rot` = launch direction (0 = up). | `w` (def 0.1, 0.02–1), `travel` (def 0.08, 0.01–0.5), `stiffness` (def 80 N/m, 1–5000), `damping` (def 0.5, 0–100), `mode`: `"passive"` (def — compresses on impact and bounces back) or `"triggered"` (starts compressed and latched; releases when activated) |
+| `spring` [dyn] | Compressible launcher pad (springboard/kicker). | Static base + plate on a prismatic joint with spring stiffness and damping. | Base center; `rot` = launch direction (0 = up). | `w` (def 0.1, 0.02–1), `travel` (def 0.08, 0.01–0.5), `stiffness` (def 25 N/m, 1–5000), `damping` (def 0.5, 0–100), `mode`: `"passive"` (def — compresses on impact and bounces back) or `"triggered"` (starts compressed and latched; releases when activated) |
 | `pendulum` [dyn] | Anchor + arm + bob. | Revolute joint at anchor; arm either rigid rod (fixed link) or rope (max-distance). | Anchor point; `rot` = arm displacement from straight down. | `len` (def 0.3, 0.05–5), `bobR` (def 0.04, 0.01–0.5), `arm`: `"rod"` (def) or `"rope"`. Bob defaults: density 6, friction 0.4, restitution 0.2 |
 | `piston` [dyn] | Motorized pusher that extends and retracts. | Static base + head on a motorized prismatic joint. | Base center; `rot` = push direction (0 = up). | `stroke` (def 0.15, 0.02–2), `w` (def 0.06, 0.02–0.5), `speed` (def 0.2 m/s, 0.01–5), `force` (def 5 N, 0.1–500), `mode`: `"cycle"` (def, auto loop), or `"triggered"` (starts retracted; extends once when activated and stays), `period` (def 2 s, 0.2–60, cycle mode), `phase` (def 0, 0–1, cycle offset) |
 | `conveyor` [static] | Belt surface that drags whatever rests on it. | Static box whose contacts get a surface velocity (Rapier contact modification — M2). | Center; `rot` tilts it. | `w` (def 0.5, 0.05–10), `h` (def 0.05, 0.02–0.5), `speed` (def 0.3 m/s, −5–5, sign = direction), `active` (bool, def true) |
@@ -150,8 +150,8 @@ Physics realizations name the Rapier building blocks; the exact force formulas, 
 
 | Type | Purpose | Force model sketch (formulas: M2) | Reference point / `rot` | Props |
 |---|---|---|---|---|
-| `fan` | Directional push (air stream). | Cone-shaped field along `rot` direction; strength falls linearly to 0 at `range`. Affects dynamic bodies in the cone. | Fan center; `rot` = blow direction (0 = right). | `strength` (def 2 N, 0.1–100), `range` (def 0.5, 0.05–10), `spread` (def 25°, 5–90 cone half-angle), `active` (bool, def true) |
-| `magnet` | Radial pull/push on `magnetic` bodies only. | Inverse-square falloff, clamped near the magnet, cut at `range`. | Magnet center. | `strength` (def 3, −100–100; positive attracts, negative repels), `range` (def 0.4, 0.05–10), `active` (bool, def true) |
+| `fan` | Directional push (air stream). | Cone-shaped field along `rot` direction; strength falls linearly to 0 at `range`. Affects dynamic bodies in the cone. | Fan center; `rot` = blow direction (0 = right). | `strength` (def 0.4 N, 0.1–100), `range` (def 0.5, 0.05–10), `spread` (def 25°, 5–90 cone half-angle), `active` (bool, def true) |
+| `magnet` | Radial pull/push on `magnetic` bodies only. | Inverse-square falloff, clamped near the magnet, cut at `range`. | Magnet center. | `strength` (def 3, −100–100; newtons at the 5 cm reference distance, 03 §7.2; positive attracts, negative repels), `range` (def 0.4, 0.05–10), `active` (bool, def true) |
 
 **Logic (static sensor zones — no collision response)**
 
@@ -336,6 +336,12 @@ Defaults do the rest: gravity 9.81, board 4 × 2.4 m, marble r 2.5 cm, dominoes 
 
 ## 12. Open questions raised here (carried in 00-PROGRESS.md)
 
-- **U6** Ideal rope-over-pulley (constant total length through `via` points) is not a native Rapier constraint — custom constraint design in M2.
-- **U7** Density/force default values are provisional; M2 does a feel/tuning pass with real simulation (may change defaults → schemaVersion 2 with migration).
+- **U6** Ideal rope-over-pulley (constant total length through `via` points) is not a native Rapier constraint — custom constraint design in M2. *(Resolved in M2: 03 §8.2.)*
+- **U7** Density/force default values are provisional; M2 does a feel/tuning pass with real simulation (may change defaults → schemaVersion 2 with migration). *(M2 did the analytic pass — see Changelog below; empirical confirmation at first implementation.)*
 - **U8** Belt/chain drives are representable (`gearMesh` positive ratio) but have no visual; decide belt rendering in M3/M8.
+
+---
+
+## 13. Changelog
+
+- **2026-07-19 (Session 3, M2 tuning pass — D8):** pre-release amendment of v1 defaults after the analytic tuning pass (03 §13): `spring.stiffness` default 80 → **25** N/m; `fan.strength` default 2 → **0.4** N; `magnet.strength` unit anchored as newtons at the 5 cm reference distance (03 §7.2 formula; value unchanged). Ranges, schema, and everything else unchanged. schemaVersion stays 1 — the format is unreleased and no scenes exist outside this repository; after release the same change would have required schemaVersion 2 + migration (§9).
