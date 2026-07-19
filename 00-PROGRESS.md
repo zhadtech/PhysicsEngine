@@ -4,8 +4,8 @@
 > Working title: *Physics Sandbox Platform* (placeholder — naming is a later decision).
 
 - **Repository role of this file:** progress tracker + decision index
-- **Last updated:** 2026-07-19 (Session 3)
-- **Current milestone:** M2 ✅ done → next is **M3 (Builder UX/UI)**
+- **Last updated:** 2026-07-19 (Session 4)
+- **Current milestone:** M3 ✅ done → next is **M4 (Backend design)**
 
 ---
 
@@ -30,6 +30,7 @@
 | D6 | Scene format v1 detail: **prefab-style catalog (18 object types + 5 link types)**, degrees in file, scalar gravity + planeAngle, explicit `gearMesh`, pulleys as rope `via` waypoints, data-only trigger/goal sensors | `02-SCENE-FORMAT.md` §11 | ✅ Accepted (Session 2) |
 | D7 | Engine build: **official `@dimforge/rapier2d-deterministic-compat`, exact-pinned (0.19.3)** — no custom Rust toolchain; engineVersion policy + determinism rules DET-1…DET-11 | `03-SIMULATION-CORE.md` §2–3 | ✅ Accepted (Session 3) |
 | D8 | **Pre-release v1 default amendments** (analytic tuning pass): `spring.stiffness` 80→25 N/m, `fan.strength` 2→0.4 N, magnet strength unit anchored (N at 5 cm ref); schemaVersion stays 1 | `03` §13, `02` §13 changelog | ✅ Accepted (Session 3) |
+| D9 | **`gearMesh` visuals & auto-management from `ratio` prop**: no `ratio` = geometric mesh (editor auto-creates on pitch-circle snap, auto-removes on drag-apart; contact-glint visual); explicit `ratio` = manual (never auto-removed; positive → open belt, negative-at-distance → crossed belt). Resolves U8 renderer-only | `04-BUILDER-UX.md` §6.4, §12.1 | ✅ Accepted (Session 4) |
 
 ---
 
@@ -42,8 +43,8 @@ Mapping of the 13 deliverables in `project_idea.md` into ordered milestones.
 | M0 | **Foundation** | Architecture overview, tech stack, ADRs 0001–0005, this tracker | 1, 2, 4 | ✅ Done (S1) |
 | M1 | **Scene data model** | JSON Schema, TypeScript interfaces, full object catalog (all object types + properties), versioning & migration rules | 3 | ✅ Done (S2) |
 | M2 | **Simulation core design** | Worker protocol spec, fixed-timestep loop, determinism spec, custom forces (fans/magnets), snapshot/reset, analytics metric computation | 4, 10 (partly) | ✅ Done (S3) |
-| M3 | **Builder UX/UI** | Wireframes, interaction model, tool specs, keyboard/touch input | 5 | ⬜ **Next** |
-| M4 | **Backend design** | Database schema, OpenAPI spec, auth design, scene storage decision | 6, 7 | ⬜ |
+| M3 | **Builder UX/UI** | Wireframes, interaction model, tool specs, keyboard/touch input | 5 | ✅ Done (S4) |
+| M4 | **Backend design** | Database schema, OpenAPI spec, auth design, scene storage decision | 6, 7 | ⬜ **Next** |
 | M5 | **Procedural generation** | Algorithm spec + pseudocode, constraint satisfaction approach | 8 | ⬜ |
 | M6 | **AI generation pipeline** | Prompt → scene JSON pipeline, validation/repair loop, cost controls | 9 | ⬜ |
 | M7 | **Community & leaderboards** | Gallery, likes/comments/follows, challenges, trending, leaderboard anti-cheat & verification | (community section) | ⬜ |
@@ -106,6 +107,22 @@ Milestone order rationale: the scene format (M1) is depended on by everything el
 - U2 (M7), U3 (M4), U5 (M9), U8 (M3/M8) unchanged.
 
 **Next milestone: M3 — Builder UX/UI.** Expected outputs: `04-BUILDER-UX.md` — screen map & wireframes (builder, player, gallery entry), interaction model (place/move/rotate/duplicate/delete, grid & snap rules, link-creation flows incl. auto-`gearMesh` on gear snap per 02 §11 item 3, anchor picking), tool & panel specs (palette from the 18-type catalog, property inspector driven by the catalog tables, world settings), keyboard/touch input maps, play-mode UI over the 03 §5 protocol (timeline from `firstActivationSteps`, event feedback, analytics panel), undo/redo model over the scene store, belt visual decision (U8).
+
+### Session 4 — 2026-07-19
+
+**Completed — M3 (Builder UX/UI):**
+- Produced `04-BUILDER-UX.md` (normative): screen map & routes with edit⇄test FSM mirroring the worker lifecycle; builder wireframes (edit + test), palette/inspector/status-bar layout; camera model (tilt-clamped workshop view, planeAngle roll clamp ±25° + gravity compass), grid tied to snap step; interaction model — click/drag placement, **domino-run drag tool** (spacing 0.75·h), surface-seat snap along gravity, **prop-handle gizmos** (handles edit catalog props, never free transforms), duplicate/clipboard (`physics-sandbox/objects@1`, boundary rules for links/refs), cascade delete; snapping system (grid/rotation steps, smart guides incl. equal-spacing repeat, screen-space anchor snap, **gear pitch-circle snap with auto-`gearMesh`**); link-creation flows per type (rope `via` waypoint clicks, quick-link `L`, trigger/goal canvas pick modes); **descriptor-driven inspector** (compile-checked field tables), world/meta panel, live validation panel, worker error/warning copy tables; undo/redo command model (coalescing, composites, 200-step ring, save-pointer dirty tracking); test mode over 03 §5 (transport controls incl. determinism-honest Reset+Play, HUD + debug overlay, **timeline as event log** with `durationHint` target zone, analytics panel mapping `AnalyticsReport` incl. client-side chain rebuild from `ActivationEvent.cause` + empty-state coaching); player page (`/s/{id}`, no-autoplay + fallback-transport requirement), **thumbnail spec** (640×360 WebP, feeds M4), gallery card contract; rendering notes (D9 belt visuals, rope sag/wrap, sleep dimming, **skin name set v1** with per-type defaults); full keyboard/touch/a11y input maps; limits/autosave/import-export affordances.
+- Produced `types/editor.ts` — editor constants (`EDITOR`), tool/selection/undo-command types, `TYPE_PROP_FIELDS`/`LINK_PROP_FIELDS` inspector descriptors with **prop keys compile-checked against `types/scene.ts`** (ranges mirror the schema, defs mirror 02 §5.3), palette groups with type-level coverage proof, `ID_PREFIX`, skins, D9 `gearMeshVisual()` classifier, machine-readable `DEFAULT_KEYMAP`.
+- **Verified:** `tsc --strict --exactOptionalPropertyTypes --noUncheckedIndexedAccess` passes on all four type files; negative test confirmed the proofs bite (dropping `goal` from the palette and typo'ing a prop key each fail compilation with the offending name).
+- **D9** recorded (belt/mesh visuals + geometric-vs-manual `gearMesh` rule derived from `ratio` presence — no sidecar state, remix-safe). **U8 resolved.**
+
+**Unresolved issues (status after S4):**
+- U8 ✅ resolved (D9; 04 §12.1).
+- **U11 (new):** presentation asset pass — materials for the 8 skin names, belt/rope meshes + animation polish, SFX palette from `CollisionEvent.impulse`, `InstancedMesh` strategy for skins × types. → M8.
+- **U12 (new):** touch interaction set (gesture conflicts, anchor sheet, two-finger-twist rotate) needs validation on real devices; adjust `EDITOR` constants only. → first implementation / M8.
+- U2 (M7), U3 (M4), U5 (M9), U9 (M9), U10 (first implementation) unchanged.
+
+**Next milestone: M4 — Backend design.** Expected outputs: `05-BACKEND.md` — PostgreSQL schema (users + OAuth identities, scenes with versioning/size caps, thumbnails, remix lineage, tables shaped for M7 social without implementing it), OpenAPI spec (scenes CRUD + remix + gallery queries + thumbnail upload per 04 §11.2, error model aligned with the shared validation gate), auth design (email + OAuth per 01 §4, session cookies, anonymous-draft → account upgrade path), **scene storage decision (U3: JSONB vs object storage)**, server-side validation via the shared `scene-format` package (ADR-0004 rationale made concrete), rate limits & abuse caps, autosave/draft sync semantics for 04 §14, privacy/publish state machine (01 §6). Covers brief items 6, 7.
 
 ---
 

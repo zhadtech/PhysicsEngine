@@ -386,4 +386,4 @@ Force/energy sanity: piston 5 N vs. heaviest default part (40 g ⇒ 0.4 N weight
 
 - **U9** — cross-ISA golden-hash CI must confirm enhanced-determinism across platforms (low risk; M9 sets up the matrix, first implementation runs it).
 - **U10** — Rapier motor parameter naming/behavior for force caps (`maxTorque`/`force`) verified only by API presence, not by dynamics tests; confirm exact motor model (impulse clamp vs. stiffness form) at first implementation. Fallback: model motors in our P4 layer (same solver as §8).
-- U8 (belt visuals) unchanged → M3/M8.
+- U8 (belt visuals) unchanged → M3/M8. *(Since resolved in M3: D9, 04 §12.1.)*

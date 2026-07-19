@@ -338,7 +338,7 @@ Defaults do the rest: gravity 9.81, board 4 × 2.4 m, marble r 2.5 cm, dominoes 
 
 - **U6** Ideal rope-over-pulley (constant total length through `via` points) is not a native Rapier constraint — custom constraint design in M2. *(Resolved in M2: 03 §8.2.)*
 - **U7** Density/force default values are provisional; M2 does a feel/tuning pass with real simulation (may change defaults → schemaVersion 2 with migration). *(M2 did the analytic pass — see Changelog below; empirical confirmation at first implementation.)*
-- **U8** Belt/chain drives are representable (`gearMesh` positive ratio) but have no visual; decide belt rendering in M3/M8.
+- **U8** Belt/chain drives are representable (`gearMesh` positive ratio) but have no visual; decide belt rendering in M3/M8. *(Resolved in M3: D9, 04 §12.1.)*
 
 ---
 
