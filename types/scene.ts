@@ -234,7 +234,7 @@ export interface SpringObject extends ObjBase<'spring'> {
     w?: number;
     /** Compression travel, m. Default 0.08. */
     travel?: number;
-    /** N/m. Default 80. */
+    /** N/m. Default 25. */
     stiffness?: number;
     /** Default 0.5. */
     damping?: number;
@@ -297,7 +297,7 @@ export interface PulleyObject extends ObjBase<'pulley'> {
 
 export interface FanObject extends ObjBase<'fan'> {
   props?: {
-    /** N at source. Default 2. */
+    /** N (peak, at the fan; linear falloff to 0 at range). Default 0.4. */
     strength?: number;
     /** m. Default 0.5. */
     range?: number;
@@ -310,7 +310,7 @@ export interface FanObject extends ObjBase<'fan'> {
 
 export interface MagnetObject extends ObjBase<'magnet'> {
   props?: {
-    /** Signed: positive attracts, negative repels. Default 3. */
+    /** N at the 5 cm reference distance (03 §7.2). Positive attracts, negative repels. Default 3. */
     strength?: number;
     /** m. Default 0.4. */
     range?: number;

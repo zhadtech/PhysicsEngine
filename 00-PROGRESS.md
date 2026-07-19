@@ -4,8 +4,8 @@
 > Working title: *Physics Sandbox Platform* (placeholder — naming is a later decision).
 
 - **Repository role of this file:** progress tracker + decision index
-- **Last updated:** 2026-07-19 (Session 2)
-- **Current milestone:** M1 ✅ done → next is **M2 (Simulation Core Design)**
+- **Last updated:** 2026-07-19 (Session 3)
+- **Current milestone:** M2 ✅ done → next is **M3 (Builder UX/UI)**
 
 ---
 
@@ -28,6 +28,8 @@
 | D4 | Backend: **Node.js + TypeScript + Fastify + PostgreSQL**, no server-side physics | ADR-0004 | ✅ Accepted |
 | D5 | Scene format: **versioned JSON describing inputs, never results** | ADR-0005 | ✅ Accepted |
 | D6 | Scene format v1 detail: **prefab-style catalog (18 object types + 5 link types)**, degrees in file, scalar gravity + planeAngle, explicit `gearMesh`, pulleys as rope `via` waypoints, data-only trigger/goal sensors | `02-SCENE-FORMAT.md` §11 | ✅ Accepted (Session 2) |
+| D7 | Engine build: **official `@dimforge/rapier2d-deterministic-compat`, exact-pinned (0.19.3)** — no custom Rust toolchain; engineVersion policy + determinism rules DET-1…DET-11 | `03-SIMULATION-CORE.md` §2–3 | ✅ Accepted (Session 3) |
+| D8 | **Pre-release v1 default amendments** (analytic tuning pass): `spring.stiffness` 80→25 N/m, `fan.strength` 2→0.4 N, magnet strength unit anchored (N at 5 cm ref); schemaVersion stays 1 | `03` §13, `02` §13 changelog | ✅ Accepted (Session 3) |
 
 ---
 
@@ -39,8 +41,8 @@ Mapping of the 13 deliverables in `project_idea.md` into ordered milestones.
 |----|-----------|------------------|----------------------|--------|
 | M0 | **Foundation** | Architecture overview, tech stack, ADRs 0001–0005, this tracker | 1, 2, 4 | ✅ Done (S1) |
 | M1 | **Scene data model** | JSON Schema, TypeScript interfaces, full object catalog (all object types + properties), versioning & migration rules | 3 | ✅ Done (S2) |
-| M2 | **Simulation core design** | Worker protocol spec, fixed-timestep loop, determinism spec, custom forces (fans/magnets), snapshot/reset, analytics metric computation | 4, 10 (partly) | ⬜ **Next** |
-| M3 | **Builder UX/UI** | Wireframes, interaction model, tool specs, keyboard/touch input | 5 | ⬜ |
+| M2 | **Simulation core design** | Worker protocol spec, fixed-timestep loop, determinism spec, custom forces (fans/magnets), snapshot/reset, analytics metric computation | 4, 10 (partly) | ✅ Done (S3) |
+| M3 | **Builder UX/UI** | Wireframes, interaction model, tool specs, keyboard/touch input | 5 | ⬜ **Next** |
 | M4 | **Backend design** | Database schema, OpenAPI spec, auth design, scene storage decision | 6, 7 | ⬜ |
 | M5 | **Procedural generation** | Algorithm spec + pseudocode, constraint satisfaction approach | 8 | ⬜ |
 | M6 | **AI generation pipeline** | Prompt → scene JSON pipeline, validation/repair loop, cost controls | 9 | ⬜ |
@@ -86,6 +88,24 @@ Milestone order rationale: the scene format (M1) is depended on by everything el
 - U8: Belt/chain drives representable (`gearMesh` with positive ratio) but have no visual → belt rendering decision in M3/M8.
 
 **Next milestone: M2 — Simulation core design.** Expected outputs: `03-SIMULATION-CORE.md` — worker protocol (messages, shared-buffer layout), fixed-timestep loop & interpolation contract, determinism spec (incl. U1 spike plan, quantized-input round-trip rule), custom force layer (fan cone / magnet falloff formulas, conveyor contact velocity — U4), prefab expansion rules (how each catalog type maps to bodies/joints), pulley constraint design (U6), snapshot/reset semantics, trigger signal processing, analytics metric definitions & algorithms, default-tuning pass (U7).
+
+### Session 3 — 2026-07-19
+
+**Completed — M2 (Simulation core design):**
+- **U1 spike executed** (not just planned): dimforge publishes **official deterministic builds** — `@dimforge/rapier2d-deterministic(-compat)` 0.19.3, same release train as the standard package. Installed and ran in Node: full API checklist present (rope + spring joints, revolute/prismatic motors + limits, snapshot/restore, sensors, contact-pair queries, CCD, `applyImpulseAtPoint`, `convexHull`); 600-step double-run identity and mid-run snapshot/restore equivalence both bit-identical (hash `91a2b287`, darwin-arm64/Node 24). → **D7**: pin the official package; no custom Rust toolchain. Cross-ISA confirmation split off as U9.
+- Produced `03-SIMULATION-CORE.md` (normative): environment-free SimCore package shape (same code in worker + Node for CI/replay); determinism rules **DET-1…DET-11** (fixed 60 Hz step, pinned build, stable construction order, quantized-input round-trip, transcendentals load-time-only via own `dmath` — per-step code restricted to IEEE-exact ops, single PCG32, fixed phase order, command log on step boundaries, two-phase effects, deterministic removal, one-way transport); step pipeline P0–P7; worker protocol (lifecycle FSM, commands/acks, SAB triple-buffer layout, postMessage fallback, pacing + renderer interpolation contract); prefab expansion tables for all 18 object types + 5 link types (exact geometry incl. ramp vertices, curve tessellation formula, joint/motor configs, creation order); field/surface forces — fan cone (axis-aligned, linear falloff), magnet (inverse-square anchored at 5 cm reference), conveyor (grip-capped contact impulses) — **U4 resolved**; custom Gauss-Seidel layer — `gearMesh` ratio constraint + rope-over-pulley shared-budget unilateral constraint — **U6 resolved**; finish conditions (stopped / hardCap 600 s / quiescent / idle); trigger–goal semantics; normative analytics (activation thresholds, cause-attribution forest, chain metrics, efficiency formula, state hash for future replay verification); snapshot/reset bundle (`ExtraState` completeness rule); CI verification plan (golden hashes, round-trip, command-boundary, force-layer units, perf smoke).
+- Produced `types/protocol.ts` — commands, messages, events, `AnalyticsReport`, SAB layout + engine constants. **Verified:** `tsc --strict` (with `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`) passes on scene + typecheck + protocol types.
+- **D8 — defaults tuning pass (U7):** analytic mass/energy pass over the catalog at desk scale (table in 03 §13). Two defaults were off by ~an order of magnitude and amended **pre-release** in 02 + `types/scene.ts` (with 02 §13 changelog): `spring.stiffness` 80→25 N/m, `fan.strength` 2→0.4 N; magnet strength unit anchored (N at the 5 cm reference — the formula makes the default sane). schemaVersion stays 1 (format unreleased). **Re-verified:** ajv strict suite still green (schema compiles, both examples valid, 15 negatives rejected, 3 positives accepted).
+- Naming hygiene: 03's determinism rules use the `DET-n` prefix so they can't collide with project decisions `Dn` in this file.
+
+**Unresolved issues (status after S3):**
+- U1 ✅ resolved (D7); U4 ✅ resolved (03 §7); U6 ✅ resolved (03 §8.2).
+- U7 → narrowed: analytic pass done (D8); empirical confirmation with the running engine at first implementation; any post-release change = schemaVersion 2 + migration.
+- **U9 (new):** cross-ISA golden-hash CI (linux-x64 + macos-arm64, browser triple later) must confirm `enhanced-determinism` across platforms — the spike covered one machine. → M9 / first implementation.
+- **U10 (new):** Rapier motor force-cap semantics (`maxTorque`, piston `force`) verified by API presence only; confirm the exact motor model at implementation (fallback: motors in the custom constraint layer).
+- U2 (M7), U3 (M4), U5 (M9), U8 (M3/M8) unchanged.
+
+**Next milestone: M3 — Builder UX/UI.** Expected outputs: `04-BUILDER-UX.md` — screen map & wireframes (builder, player, gallery entry), interaction model (place/move/rotate/duplicate/delete, grid & snap rules, link-creation flows incl. auto-`gearMesh` on gear snap per 02 §11 item 3, anchor picking), tool & panel specs (palette from the 18-type catalog, property inspector driven by the catalog tables, world settings), keyboard/touch input maps, play-mode UI over the 03 §5 protocol (timeline from `firstActivationSteps`, event feedback, analytics panel), undo/redo model over the scene store, belt visual decision (U8).
 
 ---
 
