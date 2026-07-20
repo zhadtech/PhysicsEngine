@@ -4,8 +4,8 @@
 > Working title: *Physics Sandbox Platform* (placeholder — naming is a later decision).
 
 - **Repository role of this file:** progress tracker + decision index
-- **Last updated:** 2026-07-20 (Session 5)
-- **Current milestone:** M4 ✅ done → next is **M5 (Procedural generation)**
+- **Last updated:** 2026-07-20 (Session 6)
+- **Current milestone:** M5 ✅ done → next is **M6 (AI generation pipeline)**
 
 ---
 
@@ -34,6 +34,8 @@
 | D10 | **Scene storage (U3): Postgres JSONB in a dedicated `scene_revisions` table** — metadata/document separation structural (lists never touch docs); object-storage escape hatch pre-designed with explicit revisit triggers (p95 doc > 256 KB, table > 500 GB, TOAST in GET p95) | `05-BACKEND.md` §2 | ✅ Accepted (Session 5) |
 | D11 | **Revision + publish model**: immutable per-save revisions; `head_rev` vs `published_rev` pointers (publish pins head; edits never leak until re-publish); visibility private/unlisted/public with DDL-enforced invariant; ETag/If-Match optimistic concurrency; keep-20 pruning FK-protected | `05-BACKEND.md` §3–4 | ✅ Accepted (Session 5) |
 | D12 | **Auth**: DB sessions + `__Host-` cookie (no JWTs), argon2id (64 MiB/3/1), PKCE OAuth (Google/GitHub) with verified-email-only auto-linking, verified-email publish gate, zero server-side anonymous state (drafts stay in IndexedDB), Origin-check CSRF | `05-BACKEND.md` §6 | ✅ Accepted (Session 5) |
+| D13 | **Procgen architecture**: stage-grammar over baton hand-offs (18-stage library, gear excluded pending U10), serpentine gravity-frame layout with exact seating, **verify-by-simulation self-check** (headless SimCore, gates G1–G6, targeted repair, closest-candidate fallback), fully client-side, deterministic under PG-1…PG-6 (labeled PCG32 streams, canonical writer, procgenVersion-scoped byte reproducibility, chaos = distribution width) | `06-PROCGEN.md` | ✅ Accepted (Session 6) |
+| D14 | **Pre-release 03 §10 amendment — sensor-entry attribution** (rule 0: a trigger/goal's activation cause = the entering body; `ActivationCause` gains `{ via: 'sensor' }`). Sensors emit intersection events, not collision-starts, so trigger wires silently fragmented the chain forest — found designing M5's G4 gate | `03` §10, §15; `types/protocol.ts` | ✅ Accepted (Session 6) |
 
 ---
 
@@ -48,8 +50,8 @@ Mapping of the 13 deliverables in `project_idea.md` into ordered milestones.
 | M2 | **Simulation core design** | Worker protocol spec, fixed-timestep loop, determinism spec, custom forces (fans/magnets), snapshot/reset, analytics metric computation | 4, 10 (partly) | ✅ Done (S3) |
 | M3 | **Builder UX/UI** | Wireframes, interaction model, tool specs, keyboard/touch input | 5 | ✅ Done (S4) |
 | M4 | **Backend design** | Database schema, OpenAPI spec, auth design, scene storage decision | 6, 7 | ✅ Done (S5) |
-| M5 | **Procedural generation** | Algorithm spec + pseudocode, constraint satisfaction approach | 8 | ⬜ **Next** |
-| M6 | **AI generation pipeline** | Prompt → scene JSON pipeline, validation/repair loop, cost controls | 9 | ⬜ |
+| M5 | **Procedural generation** | Algorithm spec + pseudocode, constraint satisfaction approach | 8 | ✅ Done (S6) |
+| M6 | **AI generation pipeline** | Prompt → scene JSON pipeline, validation/repair loop, cost controls | 9 | ⬜ **Next** |
 | M7 | **Community & leaderboards** | Gallery, likes/comments/follows, challenges, trending, leaderboard anti-cheat & verification | (community section) | ⬜ |
 | M8 | **Performance & scale** | Client perf budget (thousands of objects), rendering strategy (instancing), backend scaling | 10 | ⬜ |
 | M9 | **Infrastructure & deployment** | CI/CD, hosting, observability, environments | (technical goals) | ⬜ |
@@ -145,6 +147,23 @@ Milestone order rationale: the scene format (M1) is depended on by everything el
 - U2 (M7), U5 (M9), U9 (M9), U10/U7/U12 (first implementation), U11 (M8) unchanged.
 
 **Next milestone: M5 — Procedural generation.** Expected outputs: `06-PROCGEN.md` — parameter surface from the brief (seed, target duration, object count/types, difficulty, plane angle, theme, chaos, desired chain-reaction count) mapped onto scene-format inputs; generator architecture (client-side, seeded PCG32 per 03 DET-6 — same seed ⇒ same machine); machine-idiom template/grammar library (domino runs, marble drops, ramp cascades, lever/pulley lifts, trigger chains) with composition rules; placement/constraint-satisfaction approach (support & reachability, no-overlap, bounds fitting, solver order + backtracking) with pseudocode; **self-check loop**: generated scenes must pass the full 02 validation gate, and headless SimCore (03 — same package in Node) confirms finish conditions / chain metrics vs. the requested parameters (reject-and-retry budget); difficulty/chaos knob semantics; integration: Generate dialog (04 §3.1), scenes saved via the M4 API as ordinary documents (ADR-0005 rule 5 — no special gate). Likely `types/procgen.ts` (params, template descriptors, generator report) compile-tied to `types/scene.ts`. Covers brief item 8.
+
+### Session 6 — 2026-07-20
+
+**Completed — M5 (Procedural generation):**
+- **Calibration spike executed first** (S3 pattern — scratchpad, not committed; full record in 06 §12): reference **PCG32** in BigInt reproduces the published pcg32-demo prefix (6-value test vector recorded); mini-expansion (03 §6 geometry for platform/ramp/domino/marble/sensors) on the real pinned `rapier2d-deterministic-compat@0.19.3`. Measured: **exact seating never activates** (max |v| 10⁻⁷ m/s — 6 orders under `V_ACT`, so seated machines start silent); ramp exit `K_RAMP_EXIT 0.92·√(4gΔy/3)`; domino front speed `K(s/h)·√(g·h)` sweep (0.797 at default 0.75 spacing ⇒ 85 ms/domino; √h scaling ±5% for h 0.05–0.12; **regime break at h 0.2** → run heights capped 0.15); flat runout retains 100%/m (**flats are time knobs, never brakes**); center-spin domino starters **fail** (floor contact eats the energy) → normative **corner-pivot kick** formula; determinism double-run identical; ~190–240 k steps/s headless. **End-to-end existence proof:** mini-generator (ramp → runout → 40 dominoes → goal) through ajv-strict gate + simulated self-check: success, goal at 5.72 s vs 6.00 s target (−4.7%), 40/40 activated, byte-identical regenerate.
+- Produced `06-PROCGEN.md` (normative): parameter surface (brief's 9 knobs → `GenParams` → scene fields → gates, clamp/viability rules incl. port-graph closure check); determinism rules **PG-1…PG-6** (pure function, labeled PCG32 streams `cand{i}/lane{l}/stage{j}/{purpose}` so repairs stay local, canonical writer with fixed key orders, chaos = width never entropy, procgenVersion-scoped goldens, budgets counted in steps not wall-clock); machine model (5 baton kinds; **catalog truths CT-1…CT-8** — only roots self-start, gears can't start off (→ excluded, ties U10), the 5 signal receivers, step-0 fields root their own trees, crisp-hand-off attribution window, bounds/time caps, no rolling resistance); 18-stage library with recipes/sentinels; planner + multi-lane timing (`chains` = lanes; delayed roots via cycle-piston `period = 2·delay, phase 0.5`; **anti-idle overlap rule** — activity-interval union may not gap ≥ 4 s or the engine's idle finisher kills the run); layout CSP (gravity-frame serpentine rows, generator-chosen bounds, **exact seating with quantization-error proof**, ballistic hand-off solver with funnels/adapters, backtracking budgets, OBB safety net); self-check loop (SimCore harness **shared with M6**, gates G1–G6, diagnosis→repair table, closest-candidate fallback per the brief's "as closely as possible"); difficulty/chaos/theme semantics; Generate-dialog integration (04 §3.1 Procedural tab, insert = one composite undo, save path ordinary by design); CI plan (goldens, 100%-G1 fuzz, calibration regression, perf smoke).
+- Produced `types/procgen.ts`: `GenParams`/defaults/ranges (value-tied to `LIMITS.maxObjects`, `SIM.HARD_CAP_S`), `STAGE_LIBRARY` (18 descriptors) with **compile proofs that name culprits** (catalog-type coverage vs `PROCGEN_EXCLUDED_TYPES`, starter/terminal set equality), `THEMES` (skins compile-tied to editor `SKIN_NAMES`), plan IR, `GenReport`/gates, `PROCGEN` constants (budgets, tolerances, calibrated models), `PCG32_TEST_VECTOR`.
+- **D14 — pre-release 03 amendment** (D8 mechanics): sensor-entry attribution rule 0 in 03 §10 + changelog §15; `ActivationCause` gains `{ via: 'sensor' }` (additive). Found because G4's chain accounting fragmented at every trigger wire under the old rules.
+- **Verified:** strict tsc passes on all six type files; **5/5 negative compile tests bite naming the offender** (dropped stage, typo'd ObjectType, unknown skin, missing starter, unexcluded gear); spike suite green (schema gate, sim gates, determinism, PCG32 vectors).
+
+**Unresolved issues (status after S6):**
+- **U16 (new):** estimate models calibrated on a mini-expansion, one platform — recalibrate on real SimCore across the full stage library at first implementation; drift > 15% = procgenVersion bump (06 §11).
+- **U17 (new):** generation wall-time on low-end devices (worst corner ≈ 650 k simulated steps); measure at implementation; budget constants or a fast-preview preset may need M8 attention.
+- U10 note: motor-model risk now also blocks `gear` stages in procgen (06 CT-2) — resolving it unlocks a library extension.
+- U2 (M7), U5 (M9), U9 (M9), U7/U10/U12 (first implementation), U11 (M8), U13 (M10), U14 (M9), U15 (M9) unchanged.
+
+**Next milestone: M6 — AI generation pipeline.** Expected outputs: `07-AI-PIPELINE.md` — prompt → scene JSON pipeline (model + structured-output strategy; system prompt compiled from the 02 catalog tables + few-shot corpus scenes; degrees/defaults conventions stated for the model); **validation/repair loop reusing procgen's `check.ts` harness verbatim** (06 §8.1 contract: G1 gate → simulated gates → diagnosis fed back as repair prompts, bounded rounds); serving decision (server-side proxy holding provider keys vs client BYO-key — rate limits/quotas extending 05 §8, cost controls, abuse caps; likely a `POST /ai/generate`-style addition to the 05 API needing D-decision); Generate-dialog AI tab (04 §3.1's second half; streaming progress, paste-fragment fallback via the 04 §5.2 clipboard format); prompt-injection/content-safety posture for user text; eval corpus + metrics (gate pass rates per model, cost per accepted scene); likely `types/ai.ts` compile-tied to `types/procgen.ts` report shapes. Covers brief item 9.
 
 ---
 

@@ -187,7 +187,9 @@ export interface CollisionEvent extends EvBase<'collision'> {
 export type ActivationCause =
   | { via: 'contact'; from: Id }
   | { via: 'trigger'; from: Id }
-  | { via: 'field'; from: Id };
+  | { via: 'field'; from: Id }
+  /** O is a trigger/goal; `from` = owner of the body that entered it (03 §10 rule 0). */
+  | { via: 'sensor'; from: Id };
 
 export interface ActivationEvent extends EvBase<'activation'> {
   obj: Id;
