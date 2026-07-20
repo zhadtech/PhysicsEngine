@@ -19,7 +19,7 @@
 **Non-goals (for MVP)**
 
 - No real-time multiplayer editing (roadmap item, M10).
-- No server-side physics validation at launch (spot-check design comes in M7).
+- No server-side physics *in the request path* — the API never simulates to answer a call. (M7 amended the rest of this line: because a run is a pure function of the document, leaderboard metrics are recomputed by a background verification job rather than spot-checked. See `08-COMMUNITY.md` §5.)
 - No native mobile apps; responsive web only.
 
 ---
@@ -117,7 +117,7 @@ Rules that keep this clean:
 
 ### 3.5 Analytics
 
-The worker accumulates metrics during simulation from the event stream (collision pairs, first-motion "activation" per object, speeds): duration, objects activated, chain-reaction count, max speed, longest collision chain, success/failure, efficiency score. Exact definitions and algorithms: M2. Results are reported to the UI at stop and attached (client-signed only, see Risk R2) to leaderboard submissions.
+The worker accumulates metrics during simulation from the event stream (collision pairs, first-motion "activation" per object, speeds): duration, objects activated, chain-reaction count, max speed, longest collision chain, success/failure, efficiency score. Exact definitions and algorithms: M2. Results are reported to the UI at stop. *(M7 amendment: they are **not** a leaderboard input. The client may post them as advisory telemetry, whose only job is comparing the client's state hash with the server's own verification run — `08-COMMUNITY.md` §5.6.)*
 
 ---
 
@@ -166,7 +166,7 @@ Thin REST API (OpenAPI-first), stateless, horizontally scalable. Detail in M4; s
 | # | Risk / question | Impact | Mitigation / owner milestone |
 |---|-----------------|--------|------------------------------|
 | R1 | Rapier `enhanced-determinism` flag likely requires a custom WASM build (standard npm package may not enable it) | Determinism is a core promise | Spike at start of M2; fallback: pin single official build + accept per-platform variance only if spike fails (would weaken leaderboards) |
-| R2 | Client-computed metrics can be forged (leaderboards) | Community trust | Replay-verification design in M7 (Node runs same WASM); rate limits meanwhile |
+| R2 | Client-computed metrics can be forged (leaderboards) | Community trust | ✅ **Resolved in M7 (D17)** — not mitigated but removed: a run is a pure function of the document, so the server recomputes every rankable metric in its own headless SimCore and never accepts a client number. `08-COMMUNITY.md` §5 |
 | R3 | Fans, magnets, rope/pulleys are not native Rapier concepts | Object catalog completeness | Custom force-field layer + joint compositions; design in M2, catalog in M1 |
 | R4 | "Thousands of objects" both simulated and rendered | Core UX promise | 2D physics keeps sim cheap; instanced rendering (`InstancedMesh` per object type); perf budget in M8 |
 | R5 | `SharedArrayBuffer` needs COOP/COEP headers → third-party embeds of share pages get complicated | Sharing reach | Fallback transport works without SAB; embed strategy decided in M9 |
