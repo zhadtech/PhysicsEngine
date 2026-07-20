@@ -1,0 +1,1130 @@
+# ============================================================================
+# Physics Sandbox Platform — REST API (M4, normative)
+# Normative source: 05-BACKEND.md §5. Types: types/api.ts (ROUTES must match
+# this file's operations exactly — enforced by verify-backend.mjs, along with
+# error-code set equality and scene-example validity vs scene.schema.json).
+# ============================================================================
+openapi: 3.1.0
+
+info:
+  title: Physics Sandbox Platform API
+  version: 1.0.0
+  description: >-
+    Accounts, scene persistence, publishing, and gallery reads for the physics
+    sandbox (working title). The backend never simulates (01-ARCHITECTURE §1);
+    scene documents are validated by the shared scene-format package — the
+    normative document schema is scene.schema.json + the semantic rules of
+    02-SCENE-FORMAT §8, not this file. Social write endpoints (likes, comments,
+    follows), leaderboards, and challenges arrive in M7 on the same conventions.
+
+servers:
+  - url: https://api.physics-sandbox.example/v1
+    description: Placeholder host (naming is a later decision); /v1 is the API version segment.
+
+tags:
+  - name: Meta
+    description: Service plumbing.
+  - name: Auth
+    description: Registration, sessions, OAuth, email tokens (05-BACKEND §6).
+  - name: Scenes
+    description: Create/save/publish/remix — the builder's save-share surface (04 §10.5, §14).
+  - name: Gallery
+    description: Public reads — explore cards (04 §11.3) and profiles.
+
+security: []
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [Meta]
+      summary: Liveness probe
+      responses:
+        '200':
+          description: Service is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    const: ok
+
+  # ---------------------------------------------------------------- Auth ----
+  /auth/register:
+    post:
+      operationId: registerUser
+      tags: [Auth]
+      summary: Create an account (email + password) and sign it in
+      description: >-
+        Creates the account unverified and sends a verification email; the
+        session cookie is set on the response. Unverified accounts can build
+        and save private scenes but not publish (05-BACKEND §6.4).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Account created; session cookie set.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/login:
+    post:
+      operationId: loginUser
+      tags: [Auth]
+      summary: Sign in with email + password
+      description: Rotates the session token. Failure is always E_CREDENTIALS (no half-hints).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Signed in; session cookie set.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/logout:
+    post:
+      operationId: logoutUser
+      tags: [Auth]
+      summary: End this session
+      security: [{ sessionCookie: [] }]
+      responses:
+        '204':
+          description: Session deleted; cookie cleared.
+        '401': { $ref: '#/components/responses/AuthRequired' }
+
+  /auth/logout-all:
+    post:
+      operationId: logoutAllSessions
+      tags: [Auth]
+      summary: End every session for this account
+      description: Deletes all session rows and their cache entries — immediate revocation (05-BACKEND §6.2).
+      security: [{ sessionCookie: [] }]
+      responses:
+        '204':
+          description: All sessions deleted.
+        '401': { $ref: '#/components/responses/AuthRequired' }
+
+  /me:
+    get:
+      operationId: getMe
+      tags: [Auth]
+      summary: Current account
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: The signed-in account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+        '401': { $ref: '#/components/responses/AuthRequired' }
+
+  /auth/verify-email:
+    post:
+      operationId: verifyEmail
+      tags: [Auth]
+      summary: Consume an email-verification token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRequest'
+      responses:
+        '204':
+          description: Email verified; publish gate lifted.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/resend-verification:
+    post:
+      operationId: resendVerification
+      tags: [Auth]
+      summary: Re-send the verification email
+      security: [{ sessionCookie: [] }]
+      responses:
+        '202':
+          description: Queued.
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/password-reset/request:
+    post:
+      operationId: requestPasswordReset
+      tags: [Auth]
+      summary: Request a password-reset email
+      description: Responds 202 whether or not the address exists — no account enumeration (05-BACKEND §6.4).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '202':
+          description: Queued (unconditionally).
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/password-reset/confirm:
+    post:
+      operationId: confirmPasswordReset
+      tags: [Auth]
+      summary: Set a new password with a reset token
+      description: Consumes the token and revokes every session (05-BACKEND §6.4).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirmRequest'
+      responses:
+        '204':
+          description: Password changed; sessions revoked.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/oauth/{provider}/start:
+    parameters:
+      - $ref: '#/components/parameters/OauthProvider'
+    get:
+      operationId: startOauth
+      tags: [Auth]
+      summary: Begin an OAuth sign-in (redirect)
+      description: Authorization-code + PKCE; state carried in a short-lived cookie (05-BACKEND §6.3).
+      responses:
+        '302':
+          description: Redirect to the provider's consent page.
+          headers:
+            Location:
+              schema:
+                type: string
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /auth/oauth/{provider}/callback:
+    parameters:
+      - $ref: '#/components/parameters/OauthProvider'
+    get:
+      operationId: oauthCallback
+      tags: [Auth]
+      summary: OAuth provider redirect target
+      description: >-
+        Verifies state + code, then signs in / links / creates the account per
+        the verified-email linking rule (05-BACKEND §6.3) and redirects into the
+        web app.
+      parameters:
+        - name: code
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema: { type: string }
+      responses:
+        '302':
+          description: Redirect into the app (session cookie set on success).
+          headers:
+            Location:
+              schema:
+                type: string
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  # -------------------------------------------------------------- Scenes ----
+  /scenes:
+    post:
+      operationId: createScene
+      tags: [Scenes]
+      summary: Create a scene (private) from a document
+      description: >-
+        Runs the full validation gate (05-BACKEND §5.3): schema + semantic
+        rules from the shared scene-format package. Warnings never block;
+        errors return 422 with findings. Also the anonymous-draft upgrade path
+        (05-BACKEND §6.5) and the remix-free "save as copy" target.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSceneRequest'
+            example:
+              doc:
+                schemaVersion: 1
+                engineVersion: 0.1.0
+                meta: { title: First chain, tags: [tutorial], durationHint: 10 }
+                world: { seed: 42 }
+                objects:
+                  - { id: floor, type: platform, pos: [0, -0.025], props: { w: 3 } }
+                  - { id: rmp, type: ramp, pos: [-1.1, 0.15], props: { w: 0.6, h: 0.3 } }
+                  - { id: m1, type: marble, pos: [-1.35, 0.34] }
+                  - { id: d1, type: domino, pos: [-0.6, 0] }
+                  - { id: d2, type: domino, pos: [-0.54, 0] }
+                  - { id: d3, type: domino, pos: [-0.48, 0] }
+                  - { id: d4, type: domino, pos: [-0.42, 0] }
+                  - { id: g1, type: goal, pos: [-0.2, 0.05], props: { accepts: [d4] } }
+      responses:
+        '201':
+          description: Created (visibility private); warnings surfaced like the builder's panel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneWriteResponse'
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /scenes/{sceneId}:
+    parameters:
+      - $ref: '#/components/parameters/SceneId'
+    get:
+      operationId: getScene
+      tags: [Scenes]
+      summary: Fetch a scene with its document
+      description: >-
+        Owner receives the head revision (optionally ?rev= any kept revision);
+        everyone else receives the published revision if visibility allows,
+        else 404 (access matrix, 05-BACKEND §4.2). ETag names the served
+        revision. Unlisted responses carry X-Robots-Tag noindex.
+      parameters:
+        - name: rev
+          in: query
+          description: Owner only — fetch a specific kept revision.
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Scene metadata + document.
+          headers:
+            ETag:
+              description: Served revision, e.g. "7".
+              schema: { type: string }
+            X-Robots-Tag:
+              description: '"noindex" on unlisted scenes.'
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneWithDoc'
+              example:
+                scene:
+                  id: aB3xQ9tUvKp2
+                  owner: { handle: zhad, displayName: Zhad }
+                  title: Tiny marble drop
+                  description: ''
+                  tags: []
+                  visibility: public
+                  rev: 3
+                  publishedRev: 3
+                  publishedAt: 2026-07-20T10:00:00Z
+                  remixCount: 0
+                  likeCount: 0
+                  commentCount: 0
+                  schemaVersion: 1
+                  engineVersion: 0.1.0
+                  sizeBytes: 214
+                  createdAt: 2026-07-19T09:00:00Z
+                  updatedAt: 2026-07-20T10:00:00Z
+                doc:
+                  schemaVersion: 1
+                  engineVersion: 0.1.0
+                  meta: { title: Tiny marble drop }
+                  world: { seed: 7 }
+                  objects:
+                    - { id: floor, type: platform, pos: [0, -0.025] }
+                    - { id: m1, type: marble, pos: [0, 0.5] }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: saveScene
+      tags: [Scenes]
+      summary: Save — append a new head revision
+      description: >-
+        Optimistic concurrency — If-Match with the base revision is REQUIRED
+        (428 without, 412 on mismatch → the conflict flow of 05-BACKEND §7).
+        Same validation gate as create.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          description: The revision this save is based on, e.g. "7".
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveSceneRequest'
+      responses:
+        '200':
+          description: Saved; scene.rev is the new head.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneWriteResponse'
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/RevMismatch' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '428': { $ref: '#/components/responses/IfMatchRequired' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    delete:
+      operationId: deleteScene
+      tags: [Scenes]
+      summary: Move a scene to trash (soft delete)
+      description: Forced private; restorable for 30 days, then purged (05-BACKEND §4.1).
+      security: [{ sessionCookie: [] }]
+      responses:
+        '204':
+          description: Trashed.
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /scenes/{sceneId}/restore:
+    parameters:
+      - $ref: '#/components/parameters/SceneId'
+    post:
+      operationId: restoreScene
+      tags: [Scenes]
+      summary: Restore a trashed scene (to private)
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Restored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scene'
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /scenes/{sceneId}/publish:
+    parameters:
+      - $ref: '#/components/parameters/SceneId'
+    post:
+      operationId: publishScene
+      tags: [Scenes]
+      summary: Publish — pin the current head as the public revision
+      description: >-
+        Sets visibility (public or unlisted) and published_rev := head_rev
+        (05-BACKEND §4.1). Requires a verified email (E_EMAIL_UNVERIFIED
+        otherwise). Re-publish to push newer edits live. durationS is the
+        advisory card-badge fallback (04 §11.3), never ranking input.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishRequest'
+      responses:
+        '200':
+          description: Published.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scene'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /scenes/{sceneId}/unpublish:
+    parameters:
+      - $ref: '#/components/parameters/SceneId'
+    post:
+      operationId: unpublishScene
+      tags: [Scenes]
+      summary: Take a scene private
+      description: Keeps the published_rev pin for one-click re-publish (05-BACKEND §4.1).
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Now private.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scene'
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /scenes/{sceneId}/remix:
+    parameters:
+      - $ref: '#/components/parameters/SceneId'
+    post:
+      operationId: remixScene
+      tags: [Scenes]
+      summary: Remix — clone into a new private scene with lineage
+      description: >-
+        Copies the revision you can read (published for others' scenes, head
+        for your own), sets remixed_from, bumps the source's remixCount
+        (01 §5). Allowed on unlisted scenes — the link is the capability
+        (05-BACKEND §4.2).
+      security: [{ sessionCookie: [] }]
+      responses:
+        '201':
+          description: The new private scene + its document, ready for /build.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneWithDoc'
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /scenes/{sceneId}/thumbnail:
+    parameters:
+      - $ref: '#/components/parameters/SceneId'
+    put:
+      operationId: uploadThumbnail
+      tags: [Scenes]
+      summary: Upload the client-rendered thumbnail
+      description: >-
+        Raw image/webp body, exactly 640×360 (04 §11.2), ≤ 131072 bytes.
+        Stored content-addressed; the returned URL is CDN-cacheable forever
+        (05-BACKEND §5.4).
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          image/webp:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Stored and swapped in.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [thumbnailUrl]
+                properties:
+                  thumbnailUrl:
+                    type: string
+                    format: uri
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMedia' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /me/scenes:
+    get:
+      operationId: listMyScenes
+      tags: [Scenes]
+      summary: List my scenes (drafts, published, or trash)
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: state
+          in: query
+          description: active (default) or trashed.
+          schema:
+            type: string
+            enum: [active, trashed]
+            default: active
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Newest-updated first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScenePage'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+
+  # ------------------------------------------------------------- Gallery ----
+  /explore:
+    get:
+      operationId: exploreScenes
+      tags: [Gallery]
+      summary: Browse public scenes (card grid)
+      description: >-
+        Card contract of 04 §11.3. v1 ships sort=new; M7 extends the enum with
+        trending/top on the identical contract (ranking is a job output, 01 §4).
+        q searches title/description (tsvector + trigram); tag filters exact.
+      parameters:
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [new]
+            default: new
+        - name: tag
+          in: query
+          schema:
+            type: string
+            maxLength: 24
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 80
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Cards, newest-published first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardPage'
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /users/{handle}:
+    parameters:
+      - $ref: '#/components/parameters/Handle'
+    get:
+      operationId: getUserProfile
+      tags: [Gallery]
+      summary: Public profile
+      responses:
+        '200':
+          description: Profile (full profile UI lands in M7; this is the author-link surface).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/{handle}/scenes:
+    parameters:
+      - $ref: '#/components/parameters/Handle'
+    get:
+      operationId: listUserScenes
+      tags: [Gallery]
+      summary: A user's public scenes (cards)
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Public scenes only, newest-published first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardPage'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+# ============================================================================
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-ps_sess
+      description: Opaque session token (05-BACKEND §6.2); HttpOnly — set only by auth endpoints.
+
+  parameters:
+    SceneId:
+      name: sceneId
+      in: path
+      required: true
+      description: 12-char share id (05-BACKEND §3.1) — the /s/{id} capability.
+      schema:
+        type: string
+        pattern: '^[0-9A-Za-z]{12}$'
+    Handle:
+      name: handle
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9_]{3,20}$'
+    OauthProvider:
+      name: provider
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [google, github]
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque keyset cursor from a previous page's nextCursor.
+      schema:
+        type: string
+        maxLength: 200
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 24
+
+  responses:
+    BadRequest:
+      description: Malformed request (E_BAD_REQUEST) or invalid/expired token.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    AuthRequired:
+      description: No/expired session (E_AUTH_REQUIRED) or failed login (E_CREDENTIALS).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Forbidden:
+      description: E_FORBIDDEN (not owner), E_EMAIL_UNVERIFIED (publish gate), or E_QUOTA.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    NotFound:
+      description: Missing or not visible to you (E_NOT_FOUND — privacy-preserving, 05-BACKEND §4.2).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Conflict:
+      description: State conflict (E_CONFLICT) — taken handle/email, restore of non-trashed, publish of trashed…
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    RevMismatch:
+      description: If-Match ≠ current head (E_REV_MISMATCH) — run the conflict flow (05-BACKEND §7).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    TooLarge:
+      description: Body over the transport cap (E_TOO_LARGE) — 1 MiB JSON / 128 KiB thumbnail.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    UnsupportedMedia:
+      description: Thumbnail is not image/webp (E_UNSUPPORTED_MEDIA).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    ValidationFailed:
+      description: >-
+        The validation gate rejected the document (E_SCHEMA / E_SEMANTIC /
+        E_LIMITS / E_SCHEMA_NEWER) — details.findings carries the same shape
+        the builder's validation panel renders (04 §8.5).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error:
+              code: E_SEMANTIC
+              message: Scene failed 1 semantic rule.
+              details:
+                findings:
+                  - rule: E2
+                    severity: error
+                    message: 'link l1: endpoint object "ghost" does not exist'
+                    ids: [l1]
+    IfMatchRequired:
+      description: Scene PUT without If-Match (E_IF_MATCH_REQUIRED).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    RateLimited:
+      description: Bucket exhausted (E_RATE_LIMITED); Retry-After + RateLimit-* headers attached. Any endpoint may return this.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Internal:
+      description: Our bug (E_INTERNAL); message carries a request id.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              description: Machine code — superset of the worker's SimErrorCode (05-BACKEND §5.2; three-way checked vs types/api.ts and the doc table).
+              type: string
+              enum:
+                - E_BAD_REQUEST
+                - E_CREDENTIALS
+                - E_AUTH_REQUIRED
+                - E_EMAIL_UNVERIFIED
+                - E_FORBIDDEN
+                - E_QUOTA
+                - E_NOT_FOUND
+                - E_CONFLICT
+                - E_REV_MISMATCH
+                - E_TOO_LARGE
+                - E_UNSUPPORTED_MEDIA
+                - E_SCHEMA
+                - E_SEMANTIC
+                - E_LIMITS
+                - E_SCHEMA_NEWER
+                - E_IF_MATCH_REQUIRED
+                - E_RATE_LIMITED
+                - E_INTERNAL
+            message:
+              type: string
+            details:
+              type: object
+              description: 'Code-specific; for the validation codes: { findings: Finding[] }.'
+
+    Finding:
+      type: object
+      description: One validation-gate finding — same shape the builder panel consumes (02 §8 rules).
+      required: [rule, severity, message]
+      properties:
+        rule:
+          type: string
+          description: '"schema" or a 02 §8 rule id: E1–E8, W9–W12.'
+        severity:
+          type: string
+          enum: [error, warning]
+        message:
+          type: string
+        path:
+          type: string
+          description: JSON pointer into the document, when locatable.
+        ids:
+          type: array
+          items: { type: string }
+          description: Offending object/link ids, when known (builder jump-to-offender).
+
+    SceneDoc:
+      type: object
+      description: >-
+        A scene document. This API-level schema is intentionally shallow — the
+        normative contract is scene.schema.json plus the semantic rules of
+        02-SCENE-FORMAT §8, enforced by the shared scene-format package
+        (ADR-0005 rule 5). Size ≤ 1,000,000 bytes raw (02 §7).
+      required: [schemaVersion, engineVersion, world, objects]
+      properties:
+        schemaVersion:
+          type: integer
+          minimum: 1
+        engineVersion:
+          type: string
+        meta:
+          type: object
+        world:
+          type: object
+        objects:
+          type: array
+        links:
+          type: array
+
+    RegisterRequest:
+      type: object
+      required: [email, password, handle]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 10
+          maxLength: 200
+        handle:
+          type: string
+          pattern: '^[a-z0-9_]{3,20}$'
+          description: Reserved names rejected (types/api.ts RESERVED_HANDLES).
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 40
+          description: Defaults to the handle.
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    TokenRequest:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+
+    PasswordResetConfirmRequest:
+      type: object
+      required: [token, newPassword]
+      properties:
+        token:
+          type: string
+        newPassword:
+          type: string
+          minLength: 10
+          maxLength: 200
+
+    UserRef:
+      type: object
+      description: Author reference on scenes and cards.
+      required: [handle, displayName]
+      properties:
+        handle:
+          type: string
+        displayName:
+          type: string
+        avatarUrl:
+          type: string
+          format: uri
+
+    Me:
+      type: object
+      required: [id, handle, displayName, email, emailVerified, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        handle:
+          type: string
+        displayName:
+          type: string
+        email:
+          type: string
+          format: email
+        emailVerified:
+          type: boolean
+          description: false ⇒ publish returns E_EMAIL_UNVERIFIED (05-BACKEND §6.4).
+        avatarUrl:
+          type: string
+          format: uri
+        createdAt:
+          type: string
+          format: date-time
+
+    UserProfile:
+      type: object
+      required: [handle, displayName, sceneCount, createdAt]
+      properties:
+        handle:
+          type: string
+        displayName:
+          type: string
+        avatarUrl:
+          type: string
+          format: uri
+        bio:
+          type: string
+          maxLength: 500
+        sceneCount:
+          type: integer
+          description: Public scenes.
+        createdAt:
+          type: string
+          format: date-time
+
+    Scene:
+      type: object
+      description: Scene metadata (no document). rev = the revision this response corresponds to (head for owner reads, published otherwise).
+      required:
+        - id
+        - owner
+        - title
+        - description
+        - tags
+        - visibility
+        - rev
+        - remixCount
+        - likeCount
+        - commentCount
+        - schemaVersion
+        - engineVersion
+        - sizeBytes
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          pattern: '^[0-9A-Za-z]{12}$'
+        owner:
+          $ref: '#/components/schemas/UserRef'
+        title:
+          type: string
+          maxLength: 80
+        description:
+          type: string
+          maxLength: 500
+        tags:
+          type: array
+          maxItems: 10
+          items: { type: string }
+        visibility:
+          type: string
+          enum: [private, unlisted, public]
+        rev:
+          type: integer
+          minimum: 1
+        publishedRev:
+          type: integer
+          minimum: 1
+        publishedAt:
+          type: string
+          format: date-time
+        durationS:
+          type: number
+          description: Card badge value — coalesce(meta.durationHint, advisory last-run duration) (05-BACKEND §3.3).
+        remixedFrom:
+          type: string
+          description: Source scene id; absent for originals (null lineage after source purge).
+        remixCount:
+          type: integer
+        likeCount:
+          type: integer
+        commentCount:
+          type: integer
+        thumbnailUrl:
+          type: string
+          format: uri
+        schemaVersion:
+          type: integer
+        engineVersion:
+          type: string
+        sizeBytes:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SceneCard:
+      type: object
+      description: 'Gallery card — exactly the 04 §11.3 contract.'
+      required: [id, title, author, likeCount, publishedAt]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        author:
+          $ref: '#/components/schemas/UserRef'
+        thumbnailUrl:
+          type: string
+          format: uri
+        likeCount:
+          type: integer
+        durationS:
+          type: number
+        remixedFrom:
+          type: string
+        publishedAt:
+          type: string
+          format: date-time
+
+    SceneWithDoc:
+      type: object
+      required: [scene, doc]
+      properties:
+        scene:
+          $ref: '#/components/schemas/Scene'
+        doc:
+          $ref: '#/components/schemas/SceneDoc'
+
+    SceneWriteResponse:
+      type: object
+      required: [scene, warnings]
+      properties:
+        scene:
+          $ref: '#/components/schemas/Scene'
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/Finding'
+          description: 02 §8 W-rules — never blocking, surfaced like the builder's panel (04 §8.5).
+
+    CreateSceneRequest:
+      type: object
+      required: [doc]
+      properties:
+        doc:
+          $ref: '#/components/schemas/SceneDoc'
+
+    SaveSceneRequest:
+      type: object
+      required: [doc]
+      properties:
+        doc:
+          $ref: '#/components/schemas/SceneDoc'
+
+    PublishRequest:
+      type: object
+      required: [visibility]
+      properties:
+        visibility:
+          type: string
+          enum: [public, unlisted]
+        durationS:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 600
+          description: Advisory last-run duration (03 §10 durationS) for the card badge. Display only.
+
+    ScenePage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Scene'
+        nextCursor:
+          type: string
+
+    CardPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SceneCard'
+        nextCursor:
+          type: string

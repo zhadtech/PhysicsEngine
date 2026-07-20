@@ -4,8 +4,8 @@
 > Working title: *Physics Sandbox Platform* (placeholder — naming is a later decision).
 
 - **Repository role of this file:** progress tracker + decision index
-- **Last updated:** 2026-07-19 (Session 4)
-- **Current milestone:** M3 ✅ done → next is **M4 (Backend design)**
+- **Last updated:** 2026-07-20 (Session 5)
+- **Current milestone:** M4 ✅ done → next is **M5 (Procedural generation)**
 
 ---
 
@@ -31,6 +31,9 @@
 | D7 | Engine build: **official `@dimforge/rapier2d-deterministic-compat`, exact-pinned (0.19.3)** — no custom Rust toolchain; engineVersion policy + determinism rules DET-1…DET-11 | `03-SIMULATION-CORE.md` §2–3 | ✅ Accepted (Session 3) |
 | D8 | **Pre-release v1 default amendments** (analytic tuning pass): `spring.stiffness` 80→25 N/m, `fan.strength` 2→0.4 N, magnet strength unit anchored (N at 5 cm ref); schemaVersion stays 1 | `03` §13, `02` §13 changelog | ✅ Accepted (Session 3) |
 | D9 | **`gearMesh` visuals & auto-management from `ratio` prop**: no `ratio` = geometric mesh (editor auto-creates on pitch-circle snap, auto-removes on drag-apart; contact-glint visual); explicit `ratio` = manual (never auto-removed; positive → open belt, negative-at-distance → crossed belt). Resolves U8 renderer-only | `04-BUILDER-UX.md` §6.4, §12.1 | ✅ Accepted (Session 4) |
+| D10 | **Scene storage (U3): Postgres JSONB in a dedicated `scene_revisions` table** — metadata/document separation structural (lists never touch docs); object-storage escape hatch pre-designed with explicit revisit triggers (p95 doc > 256 KB, table > 500 GB, TOAST in GET p95) | `05-BACKEND.md` §2 | ✅ Accepted (Session 5) |
+| D11 | **Revision + publish model**: immutable per-save revisions; `head_rev` vs `published_rev` pointers (publish pins head; edits never leak until re-publish); visibility private/unlisted/public with DDL-enforced invariant; ETag/If-Match optimistic concurrency; keep-20 pruning FK-protected | `05-BACKEND.md` §3–4 | ✅ Accepted (Session 5) |
+| D12 | **Auth**: DB sessions + `__Host-` cookie (no JWTs), argon2id (64 MiB/3/1), PKCE OAuth (Google/GitHub) with verified-email-only auto-linking, verified-email publish gate, zero server-side anonymous state (drafts stay in IndexedDB), Origin-check CSRF | `05-BACKEND.md` §6 | ✅ Accepted (Session 5) |
 
 ---
 
@@ -44,8 +47,8 @@ Mapping of the 13 deliverables in `project_idea.md` into ordered milestones.
 | M1 | **Scene data model** | JSON Schema, TypeScript interfaces, full object catalog (all object types + properties), versioning & migration rules | 3 | ✅ Done (S2) |
 | M2 | **Simulation core design** | Worker protocol spec, fixed-timestep loop, determinism spec, custom forces (fans/magnets), snapshot/reset, analytics metric computation | 4, 10 (partly) | ✅ Done (S3) |
 | M3 | **Builder UX/UI** | Wireframes, interaction model, tool specs, keyboard/touch input | 5 | ✅ Done (S4) |
-| M4 | **Backend design** | Database schema, OpenAPI spec, auth design, scene storage decision | 6, 7 | ⬜ **Next** |
-| M5 | **Procedural generation** | Algorithm spec + pseudocode, constraint satisfaction approach | 8 | ⬜ |
+| M4 | **Backend design** | Database schema, OpenAPI spec, auth design, scene storage decision | 6, 7 | ✅ Done (S5) |
+| M5 | **Procedural generation** | Algorithm spec + pseudocode, constraint satisfaction approach | 8 | ⬜ **Next** |
 | M6 | **AI generation pipeline** | Prompt → scene JSON pipeline, validation/repair loop, cost controls | 9 | ⬜ |
 | M7 | **Community & leaderboards** | Gallery, likes/comments/follows, challenges, trending, leaderboard anti-cheat & verification | (community section) | ⬜ |
 | M8 | **Performance & scale** | Client perf budget (thousands of objects), rendering strategy (instancing), backend scaling | 10 | ⬜ |
@@ -123,6 +126,25 @@ Milestone order rationale: the scene format (M1) is depended on by everything el
 - U2 (M7), U3 (M4), U5 (M9), U9 (M9), U10 (first implementation) unchanged.
 
 **Next milestone: M4 — Backend design.** Expected outputs: `05-BACKEND.md` — PostgreSQL schema (users + OAuth identities, scenes with versioning/size caps, thumbnails, remix lineage, tables shaped for M7 social without implementing it), OpenAPI spec (scenes CRUD + remix + gallery queries + thumbnail upload per 04 §11.2, error model aligned with the shared validation gate), auth design (email + OAuth per 01 §4, session cookies, anonymous-draft → account upgrade path), **scene storage decision (U3: JSONB vs object storage)**, server-side validation via the shared `scene-format` package (ADR-0004 rationale made concrete), rate limits & abuse caps, autosave/draft sync semantics for 04 §14, privacy/publish state machine (01 §6). Covers brief items 6, 7.
+
+### Session 5 — 2026-07-20
+
+**Completed — M4 (Backend design):**
+- Produced `05-BACKEND.md` (normative): **D10 — U3 resolved** (Postgres JSONB in a dedicated `scene_revisions` table; sizing math, JSONB-vs-text rationale anchored to "canonical bytes = strict writer, simulation identity = DET-4"; object-storage escape hatch + concrete revisit triggers); **D11 — revision/publish model** (immutable per-save revisions, `head_rev`/`published_rev` pinning, tri-state visibility FSM with access matrix, trash + 30 d purge, remix = copy-published + lineage); server validation gate as an 8-step normative order (transport cap 1 MiB above the 1 MB doc cap so oversize diagnoses as `E_LIMITS`, secure parse, migrate-then-validate, W-rules returned as non-blocking `warnings`); 18-code error model as a **strict superset of the worker's `SimErrorCode`** (04 §8.6 copy extends to API failures, findings shape = builder validation panel); **D12 — auth** (DB sessions + `__Host-` cookie, argon2id 64 MiB/3/1, PKCE OAuth with verified-email-only auto-linking, verified-email publish gate, anonymous drafts stay in IndexedDB through the OAuth round-trip, Origin-check CSRF); autosave/draft sync semantics for 04 §14 (explicit-save-only server, If-Match concurrency, three-way conflict dialog, **no-merge policy** — fork on conflict); rate-limit/quota tables (login buckets sized against argon2 cost; M7 social buckets name-reserved); Redis/BullMQ job inventory (purge, prune, thumb-GC, token sweep, counter reconcile).
+- Produced `schema.sql` (9 tables): users/identities/tokens/sessions + scenes/scene_revisions + M7-shaped likes/comments/follows; DDL-enforced invariants — visibility⇒published CHECK, revision `size_bytes ≤ 1000000` mirroring `LIMITS.maxJsonBytes`, deferred composite FKs making head/published revisions unprunable-by-construction, citext-safe handle pattern (cast to text — citext `~` is case-insensitive), generated tsvector + pg_trgm indexes, list indexes that never touch doc pages.
+- Produced `openapi.yaml` (OpenAPI 3.1, 25 operations: 11 auth, 10 scenes, 3 gallery, 1 health) — card/scene DTOs matching the 04 §11.3 contract, If-Match required on saves (428/412), thumbnail PUT (`image/webp`, 640×360, ≤128 KiB, content-addressed), example scene payloads real (02 §10.1 verbatim).
+- Produced `types/api.ts`: `ApiErrorCode` + `ERROR_STATUS`, DTOs typed against `Scene`, `ROUTES` table, constants (`API`, `AUTH`, `RATE_LIMITS`, `RESERVED_HANDLES`); compile ties — `SimErrorCode ⊆ ApiErrorCode` and thumbnail dims === `EDITOR.THUMB_W/H`.
+- Produced `verify-backend.mjs` (companion to `verify.mjs`, same copy-to-scratch convention): OpenAPI 3.1 meta-schema validation; per-operation structure rules (operationId/tags/summary, enveloped ≥400 responses, declared path params); `ROUTES` ⇔ spec equality; error-code **three-way** set+status equality (api.ts / YAML enum / 05 §5.2 table); embedded example scenes validated against `scene.schema.json` (ajv strict); `schema.sql` parsed by the **real PostgreSQL grammar** (pgsql-parser/libpg_query, PG 17); table inventory ⇔ 05 §3; DDL caps/patterns ⇔ `LIMITS`/api.ts.
+- **Verified:** `tsc --strict --exactOptionalPropertyTypes --noUncheckedIndexedAccess` passes on all five type files; verify-backend suite fully green (25 ops, 18 codes, 9 tables, 35 SQL statements). **Negative tests confirmed every check bites** (6/6): drifted route path, code missing from YAML enum, corrupted example scene, SQL typo, thumbnail 641, worker code dropped from the union — each caught with the offending name.
+
+**Unresolved issues (status after S5):**
+- U3 ✅ resolved (D10).
+- **U13 (new):** server-side drafts / cross-device continue-editing deliberately deferred (MVP autosave is local-only; explicit saves only on the server) → design belongs to M10's collaboration model.
+- **U14 (new):** external vendor picks — object storage/CDN, transactional email (SPF/DKIM, deliverability). Abstracted behind modules in 05; concrete choices → M9.
+- **U15 (new):** account deletion / data-export compliance flow (erasure vs public scenes + remix lineage: scenes purge, lineage pointers null, remixes survive — policy sketched in 05 §12, not decided) → M9.
+- U2 (M7), U5 (M9), U9 (M9), U10/U7/U12 (first implementation), U11 (M8) unchanged.
+
+**Next milestone: M5 — Procedural generation.** Expected outputs: `06-PROCGEN.md` — parameter surface from the brief (seed, target duration, object count/types, difficulty, plane angle, theme, chaos, desired chain-reaction count) mapped onto scene-format inputs; generator architecture (client-side, seeded PCG32 per 03 DET-6 — same seed ⇒ same machine); machine-idiom template/grammar library (domino runs, marble drops, ramp cascades, lever/pulley lifts, trigger chains) with composition rules; placement/constraint-satisfaction approach (support & reachability, no-overlap, bounds fitting, solver order + backtracking) with pseudocode; **self-check loop**: generated scenes must pass the full 02 validation gate, and headless SimCore (03 — same package in Node) confirms finish conditions / chain metrics vs. the requested parameters (reject-and-retry budget); difficulty/chaos knob semantics; integration: Generate dialog (04 §3.1), scenes saved via the M4 API as ordinary documents (ADR-0005 rule 5 — no special gate). Likely `types/procgen.ts` (params, template descriptors, generator report) compile-tied to `types/scene.ts`. Covers brief item 8.
 
 ---
 
