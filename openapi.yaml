@@ -28,6 +28,11 @@ tags:
     description: Registration, sessions, OAuth, email tokens (05-BACKEND §6).
   - name: Scenes
     description: Create/save/publish/remix — the builder's save-share surface (04 §10.5, §14).
+  - name: AI
+    description: >-
+      Prompt → scene-candidate proxy (M6, 07-AI-PIPELINE §2). Thin by design:
+      holds the provider key, quotas, and per-generation transcript; all
+      validation/simulation gates run client-side (06 §8 harness).
   - name: Gallery
     description: Public reads — explore cards (04 §11.3) and profiles.
 
@@ -573,6 +578,76 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/AuthRequired' }
 
+  # ----------------------------------------------------- AI generation ----
+  /ai/generate:
+    post:
+      operationId: aiGenerate
+      tags: [AI]
+      summary: Generate a scene candidate from a natural-language prompt (SSE)
+      description: >-
+        Round 0 of the 07-AI-PIPELINE loop. Responds with server-sent events —
+        meta {generationId, round, quota} · progress {outputTokens, elapsedMs}
+        · result {round, status, doc?, usage} · error {standard envelope} —
+        then closes (contract: types/ai.ts AiStreamEvent). result.doc is an
+        UNVALIDATED candidate; the client must run the shared gate + check
+        harness (06 §8) before use. One concurrent generation per user (409);
+        every call debits the daily model-call budget (E_AI_BUDGET when spent).
+        Deployments without an AI key answer 503.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiGenerateRequest'
+      responses:
+        '200':
+          description: 'Event stream: meta → progress* → (result | error).'
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE frames; payload contract = types/ai.ts AiStreamEvent.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/AiRateLimited' }
+        '503': { $ref: '#/components/responses/AiUnavailable' }
+
+  /ai/generate/{generationId}/repair:
+    post:
+      operationId: aiRepair
+      tags: [AI]
+      summary: Run one repair round against client gate findings (SSE)
+      description: >-
+        Round n of the loop (≤ 2 repair calls per generation, server-enforced).
+        The client sends findings only (07 §4.6); the proxy owns the model-side
+        transcript (Redis, TTL 600 s) — clients can never supply conversation
+        turns. Unknown/expired generationId, exhausted rounds, or transcript
+        over the size cap ⇒ 409. Same stream contract as aiGenerate.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/GenerationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiRepairRequest'
+      responses:
+        '200':
+          description: 'Event stream: meta → progress* → (result | error).'
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE frames; payload contract = types/ai.ts AiStreamEvent.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/AiRateLimited' }
+        '503': { $ref: '#/components/responses/AiUnavailable' }
+
   # ------------------------------------------------------------- Gallery ----
   /explore:
     get:
@@ -678,6 +753,14 @@ components:
       schema:
         type: string
         enum: [google, github]
+    GenerationId:
+      name: generationId
+      in: path
+      required: true
+      description: Server-issued id from the aiGenerate meta event; scoped to the calling user, TTL 600 s.
+      schema:
+        type: string
+        pattern: '^[0-9A-Za-z_-]{10,32}$'
     Cursor:
       name: cursor
       in: query
@@ -771,6 +854,28 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    AiRateLimited:
+      description: >-
+        E_RATE_LIMITED (aiBurst bucket — back off and retry) or E_AI_BUDGET
+        (daily model-call budget spent — the tab disables with a quota meter
+        until Retry-After). Both carry Retry-After.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    AiUnavailable:
+      description: >-
+        E_AI_UNAVAILABLE — upstream provider down/overloaded (after SDK
+        retries), circuit breaker open (07 §7.3), or no AI key configured on
+        this deployment.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
   schemas:
     ErrorEnvelope:
@@ -802,7 +907,9 @@ components:
                 - E_SCHEMA_NEWER
                 - E_IF_MATCH_REQUIRED
                 - E_RATE_LIMITED
+                - E_AI_BUDGET
                 - E_INTERNAL
+                - E_AI_UNAVAILABLE
             message:
               type: string
             details:
@@ -1106,6 +1213,82 @@ components:
           exclusiveMinimum: 0
           maximum: 600
           description: Advisory last-run duration (03 §10 durationS) for the card badge. Display only.
+
+    AiKnobs:
+      type: object
+      description: >-
+        Optional guidance — a strict subset of procgen's GenParams (types/ai.ts
+        AiKnobs; ranges = GEN_RANGES). Unset knobs leave the prompt in charge
+        and deactivate their gate (07 §5.2).
+      additionalProperties: false
+      properties:
+        durationS: { type: number, minimum: 3, maximum: 300 }
+        objectCount: { type: integer, minimum: 8, maximum: 5000 }
+        chains: { type: integer, minimum: 1, maximum: 3 }
+        theme:
+          type: string
+          enum: [workshop, candyland, factory, dominoHall, spaceLab]
+        planeAngle: { type: number, minimum: -45, maximum: 45 }
+        allowedTypes:
+          type: array
+          maxItems: 18
+          uniqueItems: true
+          items:
+            type: string
+            enum: [platform, ramp, curve, domino, marble, crate, plank, gear,
+                   lever, spring, pendulum, piston, conveyor, pulley, fan,
+                   magnet, trigger, goal]
+
+    AiGenerateRequest:
+      type: object
+      required: [prompt]
+      additionalProperties: false
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Natural-language machine description. Rides in the user turn only (07 §7.1).
+        knobs:
+          $ref: '#/components/schemas/AiKnobs'
+      example:
+        prompt: Build a 60-second marble run with two big chain reactions.
+        knobs: { durationS: 60, chains: 2 }
+
+    AiRepairFinding:
+      type: object
+      description: One client-gate finding for the repair prompt compiler (07 §4.6; types/ai.ts AiRepairFinding).
+      required: [gate, message]
+      additionalProperties: false
+      properties:
+        gate:
+          type: string
+          enum: [G1_valid, G2_success, G3_duration, G4_chains, G5_activation, G6_count]
+        rule:
+          type: string
+          description: 'For G1_valid: "schema" or a 02 §8 rule id (E1–E8, W9–W12).'
+        message:
+          type: string
+          maxLength: 500
+        path:
+          type: string
+          description: JSON pointer into the candidate.
+        ids:
+          type: array
+          maxItems: 32
+          items: { type: string }
+
+    AiRepairRequest:
+      type: object
+      required: [findings]
+      additionalProperties: false
+      properties:
+        findings:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            $ref: '#/components/schemas/AiRepairFinding'
 
     ScenePage:
       type: object

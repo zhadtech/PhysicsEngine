@@ -18,7 +18,7 @@ The backend is accounts + persistence + sharing. It never simulates, never rende
 4. **Identity and lineage live outside the document** (ADR-0005 rule 8): owner, timestamps, `remixed_from`, counts are rows, never doc fields.
 5. **Stateless API pods.** All state is in Postgres, Redis, and object storage; any pod can serve any request (01 §4).
 
-Out of scope here, by design: likes/comments/follows *endpoints*, leaderboards, challenges, trending ranking (M7 — but their tables are shaped now, §3.5); the AI generation endpoint (M6); hosting/CI/observability (M9).
+Out of scope here, by design: likes/comments/follows *endpoints*, leaderboards, challenges, trending ranking (M7 — but their tables are shaped now, §3.5); hosting/CI/observability (M9). The AI generation endpoints landed with M6 on these conventions — normative design in `07-AI-PIPELINE.md`; their surface (two operations, two error codes, rate buckets, Redis state) is registered in §5/§5.2/§8/§9 below.
 
 ---
 
@@ -135,7 +135,7 @@ The player page `/s/{id}` (04 §11.1) is served by the web app, which calls `GET
 
 ## 5. API design
 
-Normative contract: `openapi.yaml` (OpenAPI 3.1). Route inventory + auth levels: `ROUTES` in `types/api.ts` (the verify suite holds the three artifacts equal). 25 operations: 11 auth, 10 scene, 3 gallery/profile, 1 health.
+Normative contract: `openapi.yaml` (OpenAPI 3.1). Route inventory + auth levels: `ROUTES` in `types/api.ts` (the verify suite holds the three artifacts equal). 27 operations: 11 auth, 10 scene, 2 AI generation (M6 — `07-AI-PIPELINE.md` §2; SSE responses, the spec's only non-JSON 200s besides none), 3 gallery/profile, 1 health.
 
 ### 5.1 Conventions
 
@@ -169,7 +169,9 @@ Every non-2xx response is `{ "error": { "code", "message", "details?" } }`. Code
 | `E_SCHEMA_NEWER` | 422 | Doc's `schemaVersion` newer than the server's `scene-format` — deploy lag; client shows 04 §8.6 copy |
 | `E_IF_MATCH_REQUIRED` | 428 | Scene PUT without `If-Match` |
 | `E_RATE_LIMITED` | 429 | + `Retry-After` and `RateLimit-*` headers (§8) |
+| `E_AI_BUDGET` | 429 | Daily AI model-call budget spent (M6, 07 §2.1) — distinct code because the client shows a quota meter, not backoff |
 | `E_INTERNAL` | 500 | Our bug; request id in `message` |
+| `E_AI_UNAVAILABLE` | 503 | AI upstream down / circuit breaker open / feature unconfigured (M6, 07 §2.1) |
 
 (`E_INTERNAL` is also the worker's crash code — same copy applies. The three-way equality of this table, the `ApiErrorCode` union, and the YAML enum is machine-checked.)
 
@@ -254,6 +256,7 @@ Redis token buckets (`@fastify/rate-limit` + redis store), keyed per-IP (anonymo
 | Scene create | 30 / h, 200 / day per user |
 | Scene save (PUT) | 60 / 10 min per user (manual saves only — autosave is local) |
 | Publish / remix / thumbnail / delete | 30 / day · 60 / day · 60 / day · 60 / day per user |
+| AI generation (M6, 07 §7.3) | 3 / min burst; **20 model calls / day** per user (generate + each repair debit one; exhaustion = `E_AI_BUDGET`); 1 concurrent generation (Redis lock, `E_CONFLICT`) |
 
 Quotas: `API.MAX_ACTIVE_SCENES = 500` non-trashed scenes per user (`E_QUOTA`; doubles as the procgen-spam ceiling) — with ≤ 20 kept revisions × ≤ 1 MB this bounds worst-case per-user storage at a known number. Body caps per §5.3/§5.4. All social-write buckets (M7) reserve names now in `RATE_LIMITS` so abuse posture is designed before the features land (ADR-0004 consequence).
 
@@ -261,7 +264,7 @@ Quotas: `API.MAX_ACTIVE_SCENES = 500` non-trashed scenes per user (`E_QUOTA`; do
 
 ## 9. Redis and background jobs
 
-**Redis** (01 §4): session cache (§6.2), rate buckets (§8), M7 trending zsets later. Nothing in Redis is ever the only copy of anything.
+**Redis** (01 §4): session cache (§6.2), rate buckets (§8), M6 AI per-generation transcripts + concurrency locks (07 §2.2 — TTL 600 s, size-capped, disposable by design), M7 trending zsets later. Nothing in Redis is ever the only copy of anything (a lost AI transcript just ends that generation).
 
 **BullMQ jobs** (ADR-0004): `purge-trash` (hard-delete soft-deleted scenes/users > 30 d; lineage FKs SET NULL); `prune-revisions` (keep newest 20 per scene; FKs protect head/published, §3.2); `thumb-gc` (orphaned objects after key swaps, §5.4); `token-sweep` (expired `auth_tokens`, `sessions`); `counter-reconcile` (nightly: recompute `like_count`/`comment_count`/`remix_count` from truth, alert on drift); M7 adds `trending-recompute` here.
 
