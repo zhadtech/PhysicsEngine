@@ -301,6 +301,7 @@ Constants: `V_ACT = 0.05 m/s`, `W_ACT = 10 °/s`, `CHAIN_WINDOW = 15` steps (0.2
 **Activation.** An object activates at the first step where any of its bodies has `|v| ≥ V_ACT` or `|ω| ≥ W_ACT` (initial `vel`/`angVel` ⇒ step 0), or it *fires* (trigger fires, goal satisfied, piston extends, spring releases, field/conveyor toggles on; fields starting `active` activate at step 0). **Activatable set** = all objects except pure structure (`platform`, `ramp`, `curve`, `pulley`).
 
 **Attribution (chain edges).** When object O first activates at step k, its cause is searched in priority order; first hit creates edge cause→O:
+0. **Sensor entry** (O is a `trigger` or `goal` that fired): the cause is known directly from the intersection event — the owner of the entering body; edge enterer→O. *(Added Session 6 — sensors emit intersection events, not collision-starts, so rule 1 never matches them; without this rule every trigger wire would cut the forest and start a new root. See §15.)*
 1. **Contact:** among objects P (P ≠ O, P activated at step ≤ k) with a collision-start event P↔O in `[k − CHAIN_WINDOW, k]` — most recent contact wins, ties broken by smaller id (P6 keeps a compact recent-contact table).
 2. **Trigger:** a trigger whose effect on O applied in `[k − CHAIN_WINDOW, k]`.
 3. **Field:** an active fan/magnet whose region contained O's body at step k (emitters in id order).
@@ -387,3 +388,9 @@ Force/energy sanity: piston 5 N vs. heaviest default part (40 g ⇒ 0.4 N weight
 - **U9** — cross-ISA golden-hash CI must confirm enhanced-determinism across platforms (low risk; M9 sets up the matrix, first implementation runs it).
 - **U10** — Rapier motor parameter naming/behavior for force caps (`maxTorque`/`force`) verified only by API presence, not by dynamics tests; confirm exact motor model (impulse clamp vs. stiffness form) at first implementation. Fallback: model motors in our P4 layer (same solver as §8).
 - U8 (belt visuals) unchanged → M3/M8. *(Since resolved in M3: D9, 04 §12.1.)*
+
+---
+
+## 15. Changelog
+
+- **2026-07-20 (Session 6, M5 — D14):** pre-release amendment to §10: added attribution rule 0 (**sensor entry** — a `trigger`/`goal`'s activation cause is the object whose body entered it). Sensors produce intersection events, not collision-start events, so rule 1 could never match them; every trigger wire silently fragmented the attribution forest into a new root, breaking chain metrics for any machine using signal hand-offs (found designing M5's chain accounting). `ActivationCause` in `types/protocol.ts` gains the `{ via: 'sensor'; from }` variant (additive). Analytics definitions are engineVersion-scoped (§2, §10); the engine is unimplemented and the format pre-release, so this is an in-place amendment with no migration — same mechanics as D8 (02 §13).
