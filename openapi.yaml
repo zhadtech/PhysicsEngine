@@ -35,6 +35,18 @@ tags:
       validation/simulation gates run client-side (06 §8 harness).
   - name: Gallery
     description: Public reads — explore cards (04 §11.3) and profiles.
+  - name: Social
+    description: >-
+      Likes, comments, follows, and remix lineage (M7, 08-COMMUNITY §2–§3).
+      Every counter these endpoints move is a transactional column update plus a
+      nightly reconcile (05-BACKEND §9); ranking reads them, never the client.
+  - name: Challenges
+    description: >-
+      Challenges and leaderboards (M7, 08-COMMUNITY §5–§6). Leaderboard values
+      are computed by the server's own headless SimCore run of the entered
+      document (D17) — client analytics are advisory telemetry only.
+  - name: Moderation
+    description: User-facing abuse reporting (M7, 08-COMMUNITY §7).
 
 security: []
 
@@ -661,9 +673,14 @@ paths:
       parameters:
         - name: sort
           in: query
+          description: >-
+            new = newest published · trending = 08-COMMUNITY §4.2 decayed score
+            (ranking job output) · top = all-time likes among verified scenes ·
+            following = scenes by accounts you follow (requires a session; 401
+            otherwise). Enum must equal EXPLORE_SORTS in types/community.ts.
           schema:
             type: string
-            enum: [new]
+            enum: [new, trending, top, following]
             default: new
         - name: tag
           in: query
@@ -679,12 +696,13 @@ paths:
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
-          description: Cards, newest-published first.
+          description: Cards, newest-published first (or by the requested sort).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/CardPage'
         '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
 
   /users/{handle}:
     parameters:
@@ -720,6 +738,414 @@ paths:
               schema:
                 $ref: '#/components/schemas/CardPage'
         '404': { $ref: '#/components/responses/NotFound' }
+
+  # -------------------------------------------------------------- Social ----
+  /scenes/{sceneId}/like:
+    parameters:
+      - $ref: '#/components/parameters/SceneId'
+    post:
+      operationId: likeScene
+      tags: [Social]
+      summary: Like a scene
+      description: >-
+        Idempotent — liking twice is a no-op returning the same counts (the PK
+        is (user_id, scene_id)). Likes from accounts younger than
+        SOCIAL.RANK_MIN_ACCOUNT_AGE_H still record but do not feed ranking
+        (08-COMMUNITY §4.3). Self-likes are allowed and never ranked.
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Updated counts for the scene.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneSocial'
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    delete:
+      operationId: unlikeScene
+      tags: [Social]
+      summary: Remove a like
+      description: Idempotent; unliking something you never liked returns current counts.
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Updated counts for the scene.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SceneSocial'
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /scenes/{sceneId}/comments:
+    parameters:
+      - $ref: '#/components/parameters/SceneId'
+    get:
+      operationId: listComments
+      tags: [Social]
+      summary: List a scene's comments (flat, oldest first)
+      description: >-
+        Flat threads in v1 (08-COMMUNITY §2.3). Removed comments are returned as
+        tombstones (removed: true, empty body) so reply context survives.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of comments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentPage'
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createComment
+      tags: [Social]
+      summary: Post a comment
+      description: >-
+        Requires a verified email (same gate as publish, 05-BACKEND §6.4) —
+        commenting is the cheapest abuse surface on the platform. Threads close
+        at SOCIAL.COMMENT_MAX_PER_SCENE comments (409).
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCommentRequest'
+      responses:
+        '201':
+          description: The created comment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /comments/{commentId}:
+    parameters:
+      - $ref: '#/components/parameters/CommentId'
+    delete:
+      operationId: deleteComment
+      tags: [Social]
+      summary: Delete a comment (author or scene owner)
+      description: >-
+        The comment author and the scene's owner may both delete; the row is
+        kept as a tombstone for thread continuity (08-COMMUNITY §2.3).
+      security: [{ sessionCookie: [] }]
+      responses:
+        '204':
+          description: Deleted (idempotent for an already-removed comment).
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/{handle}/follow:
+    parameters:
+      - $ref: '#/components/parameters/Handle'
+    post:
+      operationId: followUser
+      tags: [Social]
+      summary: Follow a user
+      description: Idempotent. Self-follow is rejected by the DDL (409).
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Updated follow state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FollowState'
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    delete:
+      operationId: unfollowUser
+      tags: [Social]
+      summary: Unfollow a user
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Updated follow state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FollowState'
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /users/{handle}/followers:
+    parameters:
+      - $ref: '#/components/parameters/Handle'
+    get:
+      operationId: listFollowers
+      tags: [Social]
+      summary: Accounts following this user
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRefPage'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/{handle}/following:
+    parameters:
+      - $ref: '#/components/parameters/Handle'
+    get:
+      operationId: listFollowing
+      tags: [Social]
+      summary: Accounts this user follows
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRefPage'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /scenes/{sceneId}/remixes:
+    parameters:
+      - $ref: '#/components/parameters/SceneId'
+    get:
+      operationId: getRemixTree
+      tags: [Social]
+      summary: Remix lineage — ancestors, this scene, and direct children
+      description: >-
+        Ancestors are walked upward (≤ LINEAGE.MAX_ANCESTORS) and children
+        paged; scenes that became private, were purged, or were moderated are
+        returned as unavailable placeholders so the chain never appears broken
+        (08-COMMUNITY §3).
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Lineage view.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemixTree'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # -------------------------------------------------- Run verification ----
+  /scenes/{sceneId}/verification:
+    parameters:
+      - $ref: '#/components/parameters/SceneId'
+    get:
+      operationId: getSceneVerification
+      tags: [Challenges]
+      summary: Server-computed run result for the served revision
+      description: >-
+        The authoritative metrics for this scene (08-COMMUNITY §5): the result
+        of running the document in the backend's headless SimCore. Because a run
+        is a pure function of (document, engineVersion, verifierVersion), this
+        is a cache read in the common case. state=pending means the job has not
+        finished; unranked means the scene is legal but over the verification
+        budget; failed means it did not load or finish in the verifier.
+      responses:
+        '200':
+          description: Verification record (metrics present only when verified).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Verification'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /scenes/{sceneId}/runs:
+    parameters:
+      - $ref: '#/components/parameters/SceneId'
+    post:
+      operationId: reportRun
+      tags: [Challenges]
+      summary: Report a client-side run (advisory telemetry)
+      description: >-
+        What the player's own worker computed. Never ranked and never stored as
+        a metric — the server keeps only whether the client's finalHash matched
+        its own verification, which is the standing cross-platform determinism
+        signal (U9, 08-COMMUNITY §5.6). Anonymous players may post; the response
+        tells the client whether it agreed with the server.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunReportRequest'
+      responses:
+        '202':
+          description: Recorded; agreement is 'unknown' until verification finishes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunReportResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  # ---------------------------------------------------------- Challenges ----
+  /challenges:
+    get:
+      operationId: listChallenges
+      tags: [Challenges]
+      summary: List challenges
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [open, judging, closed]
+            default: open
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Challenges, soonest-closing first for open ones.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChallengePage'
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /challenges/{challengeSlug}:
+    parameters:
+      - $ref: '#/components/parameters/ChallengeSlug'
+    get:
+      operationId: getChallenge
+      tags: [Challenges]
+      summary: Challenge brief, rules, and ranking metric
+      responses:
+        '200':
+          description: The challenge.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Challenge'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /challenges/{challengeSlug}/leaderboard:
+    parameters:
+      - $ref: '#/components/parameters/ChallengeSlug'
+    get:
+      operationId: getLeaderboard
+      tags: [Challenges]
+      summary: Ranked entries (server-verified scores only)
+      description: >-
+        Only entries whose verification succeeded and whose verified rules
+        passed carry a score and a rank; pending/unranked/disqualified entries
+        are listed with their state so an author can see what happened to theirs.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of the board, best first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaderboardPage'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /challenges/{challengeSlug}/entries:
+    parameters:
+      - $ref: '#/components/parameters/ChallengeSlug'
+    post:
+      operationId: enterChallenge
+      tags: [Challenges]
+      summary: Enter a published scene into a challenge
+      description: >-
+        Pins the given published revision. Document rules are checked
+        synchronously — failures return 422 E_CHALLENGE_RULES with one finding
+        per broken rule, in the builder's validation-panel shape. Rules that
+        depend on the run (requireSuccess, duration bounds) can only be decided
+        after verification, so a passing entry is accepted as pending and may
+        later be marked disqualified (08-COMMUNITY §6.3). Re-entering replaces
+        your existing entry (one per user).
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnterChallengeRequest'
+      responses:
+        '202':
+          description: Accepted; verification queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChallengeEntry'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/RevMismatch' }
+        '422': { $ref: '#/components/responses/EntryRejected' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /challenges/{challengeSlug}/entries/{sceneId}:
+    parameters:
+      - $ref: '#/components/parameters/ChallengeSlug'
+      - $ref: '#/components/parameters/SceneId'
+    delete:
+      operationId: withdrawEntry
+      tags: [Challenges]
+      summary: Withdraw your entry
+      security: [{ sessionCookie: [] }]
+      responses:
+        '204':
+          description: Withdrawn.
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  # ---------------------------------------------------------- Moderation ----
+  /reports:
+    post:
+      operationId: reportContent
+      tags: [Moderation]
+      summary: Report a scene, comment, or user
+      description: >-
+        One open report per (reporter, target) — repeats are 409. At
+        MODERATION.AUTO_LIMIT_REPORTS distinct reporters a scene is auto-limited
+        (delisted, direct link still works) pending human review; nothing is ever
+        auto-removed (08-COMMUNITY §7.2).
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReportRequest'
+      responses:
+        '202':
+          description: Report queued for review. No further detail is disclosed.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/AuthRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
 
 # ============================================================================
 components:
@@ -761,6 +1187,21 @@ components:
       schema:
         type: string
         pattern: '^[0-9A-Za-z_-]{10,32}$'
+    ChallengeSlug:
+      name: challengeSlug
+      in: path
+      required: true
+      description: URL slug of the challenge (CHALLENGE.SLUG_PATTERN, types/community.ts).
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9-]{2,39}$'
+    CommentId:
+      name: commentId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9]{1,19}$'
     Cursor:
       name: cursor
       in: query
@@ -789,7 +1230,10 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
     Forbidden:
-      description: E_FORBIDDEN (not owner), E_EMAIL_UNVERIFIED (publish gate), or E_QUOTA.
+      description: >-
+        E_FORBIDDEN (not owner), E_EMAIL_UNVERIFIED (publish/comment gate),
+        E_QUOTA, or E_MODERATED (the item was limited or removed by moderation —
+        only its owner ever sees this code; everyone else gets 404).
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -836,6 +1280,27 @@ components:
                     severity: error
                     message: 'link l1: endpoint object "ghost" does not exist'
                     ids: [l1]
+    EntryRejected:
+      description: >-
+        The entered document breaks the challenge's rule set
+        (E_CHALLENGE_RULES) — details.findings carries one finding per broken
+        rule, same shape as the validation panel (08-COMMUNITY §6.3).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example:
+            error:
+              code: E_CHALLENGE_RULES
+              message: Entry breaks 2 challenge rules.
+              details:
+                findings:
+                  - rule: maxObjects
+                    severity: error
+                    message: 'challenge allows at most 30 objects; this scene has 44'
+                  - rule: forbiddenTypes
+                    severity: error
+                    message: 'challenge forbids: fan'
+                    ids: [fan1]
     IfMatchRequired:
       description: Scene PUT without If-Match (E_IF_MATCH_REQUIRED).
       content:
@@ -910,6 +1375,8 @@ components:
                 - E_AI_BUDGET
                 - E_INTERNAL
                 - E_AI_UNAVAILABLE
+                - E_CHALLENGE_RULES
+                - E_MODERATED
             message:
               type: string
             details:
@@ -1311,3 +1778,284 @@ components:
             $ref: '#/components/schemas/SceneCard'
         nextCursor:
           type: string
+
+    # --------------------------------------------------------- M7 social ----
+    SceneSocial:
+      type: object
+      required: [likeCount, commentCount, remixCount]
+      properties:
+        likeCount: { type: integer, minimum: 0 }
+        commentCount: { type: integer, minimum: 0 }
+        remixCount: { type: integer, minimum: 0 }
+        viewerLiked:
+          description: Absent for anonymous readers.
+          type: boolean
+
+    FollowState:
+      type: object
+      required: [followerCount, followingCount]
+      properties:
+        followerCount: { type: integer, minimum: 0 }
+        followingCount: { type: integer, minimum: 0 }
+        viewerFollows: { type: boolean }
+
+    Comment:
+      type: object
+      required: [id, sceneId, author, body, createdAt, removed]
+      properties:
+        id: { type: string }
+        sceneId: { type: string, pattern: '^[0-9A-Za-z]{12}$' }
+        author: { $ref: '#/components/schemas/UserRef' }
+        body:
+          description: Empty string on a tombstone (removed = true).
+          type: string
+          maxLength: 1000
+        createdAt: { type: string, format: date-time }
+        removed: { type: boolean }
+
+    CreateCommentRequest:
+      type: object
+      required: [body]
+      additionalProperties: false
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 1000
+
+    CommentPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Comment' }
+        nextCursor: { type: string }
+
+    UserRefPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/UserRef' }
+        nextCursor: { type: string }
+
+    LineageNode:
+      type: object
+      required: [sceneId, title, author, unavailable]
+      properties:
+        sceneId: { type: string, pattern: '^[0-9A-Za-z]{12}$' }
+        title: { type: string }
+        author: { $ref: '#/components/schemas/UserRef' }
+        remixedFrom: { type: string, pattern: '^[0-9A-Za-z]{12}$' }
+        publishedAt: { type: string, format: date-time }
+        unavailable:
+          description: Private, purged, or moderated — title/author are placeholders.
+          type: boolean
+
+    RemixTree:
+      type: object
+      required: [ancestors, scene, children, childCount]
+      properties:
+        ancestors:
+          description: Root first, immediate parent last (≤ LINEAGE.MAX_ANCESTORS).
+          type: array
+          items: { $ref: '#/components/schemas/LineageNode' }
+        scene: { $ref: '#/components/schemas/LineageNode' }
+        children:
+          type: array
+          items: { $ref: '#/components/schemas/LineageNode' }
+        nextCursor: { type: string }
+        childCount:
+          description: Direct remixes (scenes.remix_count). Deeper totals are not maintained.
+          type: integer
+          minimum: 0
+
+    # --------------------------------------------------- M7 verification ----
+    Verification:
+      type: object
+      required: [state, engineVersion, verifierVersion]
+      properties:
+        state:
+          description: Must equal VERIFICATION_STATES in types/community.ts (verified).
+          type: string
+          enum: [pending, verified, unranked, failed]
+        engineVersion: { type: string }
+        verifierVersion: { type: string }
+        metrics:
+          description: >-
+            The engine's AnalyticsReport (03 §10), computed server-side. Present
+            only when state = verified. Normative shape lives in
+            types/protocol.ts, not here.
+          type: object
+        steps: { type: integer, minimum: 0 }
+        wallMs: { type: integer, minimum: 0 }
+        reason: { type: string }
+        verifiedAt: { type: string, format: date-time }
+
+    RunReportRequest:
+      type: object
+      required: [engineVersion, finalHash, analytics, platform]
+      additionalProperties: false
+      properties:
+        engineVersion: { type: string }
+        finalHash:
+          description: FNV-1a 32 state hash at finish, hex (03 §12).
+          type: string
+          pattern: '^[0-9a-f]{8}$'
+        analytics:
+          description: The client's own AnalyticsReport — advisory, never ranked.
+          type: object
+        platform:
+          description: Coarse bucket, e.g. 'chromium/mac-arm64'. Never a fingerprint.
+          type: string
+          maxLength: 64
+
+    RunReportResponse:
+      type: object
+      required: [agreement, verification]
+      properties:
+        agreement:
+          type: string
+          enum: [match, mismatch, unknown]
+        verification: { $ref: '#/components/schemas/Verification' }
+
+    # ----------------------------------------------------- M7 challenges ----
+    ChallengeRule:
+      description: >-
+        One entry constraint. Closed vocabulary — the normative union is
+        ChallengeRule in types/community.ts; `kind` values must agree.
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum:
+            - maxObjects
+            - minObjects
+            - allowedTypes
+            - forbiddenTypes
+            - requiredTypes
+            - maxLinks
+            - requireGoal
+            - requireSuccess
+            - maxDurationS
+            - minDurationS
+            - planeAngleRange
+            - startFromScene
+        value: { type: number }
+        types:
+          type: array
+          items: { type: string }
+        minDeg: { type: number }
+        maxDeg: { type: number }
+        sceneId: { type: string, pattern: '^[0-9A-Za-z]{12}$' }
+
+    Challenge:
+      type: object
+      required: [id, slug, title, brief, state, rules, metric, better, engineVersion, opensAt, closesAt, entryCount]
+      properties:
+        id: { type: string }
+        slug: { type: string, pattern: '^[a-z0-9][a-z0-9-]{2,39}$' }
+        title: { type: string, maxLength: 80 }
+        brief: { type: string, maxLength: 2000 }
+        state:
+          type: string
+          enum: [draft, open, judging, closed]
+        rules:
+          type: array
+          maxItems: 12
+          items: { $ref: '#/components/schemas/ChallengeRule' }
+        metric:
+          description: Ranking metric — must equal CHALLENGE_METRICS keys (verified three ways).
+          type: string
+          enum:
+            - durationS
+            - objectsActivated
+            - chainReactions
+            - longestChain
+            - maxSpeedMS
+            - efficiencyScore
+        better:
+          type: string
+          enum: [max, min]
+        engineVersion: { type: string }
+        opensAt: { type: string, format: date-time }
+        closesAt: { type: string, format: date-time }
+        entryCount: { type: integer, minimum: 0 }
+        startSceneId: { type: string, pattern: '^[0-9A-Za-z]{12}$' }
+
+    ChallengePage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Challenge' }
+        nextCursor: { type: string }
+
+    EnterChallengeRequest:
+      type: object
+      required: [sceneId, rev]
+      additionalProperties: false
+      properties:
+        sceneId: { type: string, pattern: '^[0-9A-Za-z]{12}$' }
+        rev:
+          description: Must equal the scene's current published revision (412 otherwise).
+          type: integer
+          minimum: 1
+
+    ChallengeEntry:
+      type: object
+      required: [sceneId, rev, author, card, state, enteredAt]
+      properties:
+        sceneId: { type: string, pattern: '^[0-9A-Za-z]{12}$' }
+        rev: { type: integer, minimum: 1 }
+        author: { $ref: '#/components/schemas/UserRef' }
+        card: { $ref: '#/components/schemas/SceneCard' }
+        state:
+          type: string
+          enum: [pending, verified, unranked, failed]
+        score:
+          description: The verified metric value. Present only for ranked entries.
+          type: number
+        rank: { type: integer, minimum: 1 }
+        disqualified:
+          description: Verified-rule failures found after the run (08-COMMUNITY §6.3).
+          type: array
+          items: { $ref: '#/components/schemas/Finding' }
+        enteredAt: { type: string, format: date-time }
+
+    LeaderboardPage:
+      type: object
+      required: [challenge, items]
+      properties:
+        challenge: { $ref: '#/components/schemas/Challenge' }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ChallengeEntry' }
+        nextCursor: { type: string }
+        viewerEntry: { $ref: '#/components/schemas/ChallengeEntry' }
+
+    # ----------------------------------------------------- M7 moderation ----
+    CreateReportRequest:
+      type: object
+      required: [targetType, targetId, reason]
+      additionalProperties: false
+      properties:
+        targetType:
+          type: string
+          enum: [scene, comment, user]
+        targetId:
+          description: Scene id, comment id, or handle, per targetType.
+          type: string
+          maxLength: 32
+        reason:
+          description: Must equal REPORT_REASONS in types/community.ts (verified).
+          type: string
+          enum: [spam, harassment, sexual, violence, illegal, impersonation, other]
+        note:
+          description: Shown only to moderators.
+          type: string
+          maxLength: 500

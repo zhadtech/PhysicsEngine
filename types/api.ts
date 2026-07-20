@@ -49,7 +49,10 @@ export type ApiErrorCode =
   | 'E_RATE_LIMITED'
   | 'E_AI_BUDGET'
   | 'E_INTERNAL'
-  | 'E_AI_UNAVAILABLE';
+  | 'E_AI_UNAVAILABLE'
+  // M7 (08-COMMUNITY.md §8)
+  | 'E_CHALLENGE_RULES'
+  | 'E_MODERATED';
 
 /**
  * Compile-time proof that every worker error code is a valid API code, so the
@@ -75,6 +78,8 @@ export const ERROR_STATUS: Record<ApiErrorCode, number> = {
   E_SEMANTIC: 422,
   E_LIMITS: 422,
   E_SCHEMA_NEWER: 422,
+  E_CHALLENGE_RULES: 422,
+  E_MODERATED: 403,
   E_IF_MATCH_REQUIRED: 428,
   E_RATE_LIMITED: 429,
   E_AI_BUDGET: 429,
@@ -207,10 +212,16 @@ export const RATE_LIMITS: Record<string, RateBucket> = {
   // Must satisfy aiCallsDay.limit ≥ 1 + AI.REPAIR_ROUNDS_MAX (verify-backend).
   aiBurst: { per: 'user', limit: 3, windowS: 60 },
   aiCallsDay: { per: 'user', limit: 20, windowS: 86_400 },
-  // Reserved for M7 (no endpoints yet):
+  // M7 social writes (08 §2, §7.2) — the names were reserved in M4, now live.
   like: { per: 'user', limit: 500, windowS: 86_400 },
   comment: { per: 'user', limit: 100, windowS: 86_400 },
   follow: { per: 'user', limit: 200, windowS: 86_400 },
+  /** Challenge entries/swaps — each one may enqueue a verification run. */
+  challengeEntry: { per: 'user', limit: 20, windowS: 86_400 },
+  /** Abuse reports (MODERATION.MAX_REPORTS_PER_DAY — kept equal, verified). */
+  report: { per: 'user', limit: 20, windowS: 86_400 },
+  /** Advisory run telemetry; per-IP because anonymous players post it too. */
+  runReport: { per: 'ip', limit: 120, windowS: 3600 },
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -395,4 +406,27 @@ export const ROUTES: Record<string, RouteDef> = {
   exploreScenes: { method: 'GET', path: '/explore', auth: 'none' },
   getUserProfile: { method: 'GET', path: '/users/{handle}', auth: 'none' },
   listUserScenes: { method: 'GET', path: '/users/{handle}/scenes', auth: 'none' },
+  // M7 — social (08 §2)
+  likeScene: { method: 'POST', path: '/scenes/{sceneId}/like', auth: 'session' },
+  unlikeScene: { method: 'DELETE', path: '/scenes/{sceneId}/like', auth: 'session' },
+  listComments: { method: 'GET', path: '/scenes/{sceneId}/comments', auth: 'none' },
+  createComment: { method: 'POST', path: '/scenes/{sceneId}/comments', auth: 'verified' },
+  deleteComment: { method: 'DELETE', path: '/comments/{commentId}', auth: 'session' },
+  followUser: { method: 'POST', path: '/users/{handle}/follow', auth: 'session' },
+  unfollowUser: { method: 'DELETE', path: '/users/{handle}/follow', auth: 'session' },
+  listFollowers: { method: 'GET', path: '/users/{handle}/followers', auth: 'none' },
+  listFollowing: { method: 'GET', path: '/users/{handle}/following', auth: 'none' },
+  // M7 — lineage (08 §3)
+  getRemixTree: { method: 'GET', path: '/scenes/{sceneId}/remixes', auth: 'none' },
+  // M7 — verification (08 §5)
+  getSceneVerification: { method: 'GET', path: '/scenes/{sceneId}/verification', auth: 'none' },
+  reportRun: { method: 'POST', path: '/scenes/{sceneId}/runs', auth: 'none' },
+  // M7 — challenges & leaderboards (08 §6)
+  listChallenges: { method: 'GET', path: '/challenges', auth: 'none' },
+  getChallenge: { method: 'GET', path: '/challenges/{challengeSlug}', auth: 'none' },
+  getLeaderboard: { method: 'GET', path: '/challenges/{challengeSlug}/leaderboard', auth: 'none' },
+  enterChallenge: { method: 'POST', path: '/challenges/{challengeSlug}/entries', auth: 'verified' },
+  withdrawEntry: { method: 'DELETE', path: '/challenges/{challengeSlug}/entries/{sceneId}', auth: 'owner' },
+  // M7 — moderation (08 §7)
+  reportContent: { method: 'POST', path: '/reports', auth: 'session' },
 } as const;

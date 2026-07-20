@@ -18,7 +18,7 @@ The backend is accounts + persistence + sharing. It never simulates, never rende
 4. **Identity and lineage live outside the document** (ADR-0005 rule 8): owner, timestamps, `remixed_from`, counts are rows, never doc fields.
 5. **Stateless API pods.** All state is in Postgres, Redis, and object storage; any pod can serve any request (01 §4).
 
-Out of scope here, by design: likes/comments/follows *endpoints*, leaderboards, challenges, trending ranking (M7 — but their tables are shaped now, §3.5); hosting/CI/observability (M9). The AI generation endpoints landed with M6 on these conventions — normative design in `07-AI-PIPELINE.md`; their surface (two operations, two error codes, rate buckets, Redis state) is registered in §5/§5.2/§8/§9 below.
+Out of scope here, by design: hosting/CI/observability (M9). Likes/comments/follows *endpoints*, leaderboards, challenges, and trending ranking were M7's job — they landed on these conventions and are specified in `08-COMMUNITY.md`; this document carries only their registration (tables §3, codes §5.2, buckets §8, jobs §9). The AI generation endpoints landed with M6 on these conventions — normative design in `07-AI-PIPELINE.md`; their surface (two operations, two error codes, rate buckets, Redis state) is registered in §5/§5.2/§8/§9 below.
 
 ---
 
@@ -48,9 +48,15 @@ Normative DDL in `schema.sql` (PostgreSQL 16; extensions: `citext`, `pg_trgm`, `
 | `sessions` | Server-side sessions: token hash, expiries, device info |
 | `scenes` | Scene metadata: owner, extracted meta, visibility, head/published revision pointers, counters, lineage |
 | `scene_revisions` | The documents: immutable `(scene_id, rev) → doc jsonb` rows (D10/D11) |
-| `likes` | M7-shaped: PK (user_id, scene_id) |
-| `comments` | M7-shaped: flat comments with soft delete |
-| `follows` | M7-shaped: PK (follower_id, followee_id) |
+| `likes` | Social: PK (user_id, scene_id) — endpoints landed with M7 |
+| `comments` | Social: flat comments with soft delete + moderation state (M7) |
+| `follows` | Social: PK (follower_id, followee_id) |
+
+M7 added five tables on these same conventions; they are specified in
+`08-COMMUNITY.md` §3 (inventory there, DDL in the same `schema.sql`), and the
+verify suite requires the union of both inventories to equal the DDL:
+`scene_verifications`, `run_reports`, `challenges`, `challenge_entries`,
+`content_reports`.
 
 ### 3.1 Identifiers
 
@@ -135,7 +141,7 @@ The player page `/s/{id}` (04 §11.1) is served by the web app, which calls `GET
 
 ## 5. API design
 
-Normative contract: `openapi.yaml` (OpenAPI 3.1). Route inventory + auth levels: `ROUTES` in `types/api.ts` (the verify suite holds the three artifacts equal). 27 operations: 11 auth, 10 scene, 2 AI generation (M6 — `07-AI-PIPELINE.md` §2; SSE responses, the spec's only non-JSON 200s besides none), 3 gallery/profile, 1 health.
+Normative contract: `openapi.yaml` (OpenAPI 3.1). Route inventory + auth levels: `ROUTES` in `types/api.ts` (the verify suite holds the three artifacts equal). 45 operations: 11 auth, 10 scene, 2 AI generation (M6 — `07-AI-PIPELINE.md` §2; SSE responses, the spec's only non-JSON 200s besides none), 3 gallery/profile, 18 community/challenges/moderation (M7 — `08-COMMUNITY.md`), 1 health.
 
 ### 5.1 Conventions
 
@@ -172,6 +178,8 @@ Every non-2xx response is `{ "error": { "code", "message", "details?" } }`. Code
 | `E_AI_BUDGET` | 429 | Daily AI model-call budget spent (M6, 07 §2.1) — distinct code because the client shows a quota meter, not backoff |
 | `E_INTERNAL` | 500 | Our bug; request id in `message` |
 | `E_AI_UNAVAILABLE` | 503 | AI upstream down / circuit breaker open / feature unconfigured (M6, 07 §2.1) |
+| `E_CHALLENGE_RULES` | 422 | Entry breaks the challenge's rule set (M7, 08 §6.3) — findings attached, one per rule |
+| `E_MODERATED` | 403 | Item limited/removed by moderation (M7, 08 §7.3). Only its owner sees this; others get 404 |
 
 (`E_INTERNAL` is also the worker's crash code — same copy applies. The three-way equality of this table, the `ApiErrorCode` union, and the YAML enum is machine-checked.)
 
@@ -196,7 +204,7 @@ Client-rendered per 04 §11.2 (640 × 360 WebP), uploaded `PUT /scenes/{id}/thum
 
 ### 5.5 Gallery reads
 
-`GET /explore?sort=new&tag=&q=&cursor=` returns card DTOs (04 §11.3 contract: id, title, author ref, thumbnail URL, like count, duration badge value, remix marker, publishedAt). v1 ships `sort=new` only; **M7 adds `trending`/`top` to the same enum and contract** (ranking is a job output, 01 §4 — the endpoint shape doesn't change). `q` searches tsvector + trigram; `tag` filters by containment. All gallery/profile/scene GETs are anonymous-cacheable (`Cache-Control: public, max-age=60` on published content, `private` on owner reads).
+`GET /explore?sort=new&tag=&q=&cursor=` returns card DTOs (04 §11.3 contract: id, title, author ref, thumbnail URL, like count, duration badge value, remix marker, publishedAt). M4 shipped `sort=new`; **M7 extended the enum with `trending`/`top`/`following` on the identical contract** (ranking is a job output, 01 §4 — the endpoint shape did not change; semantics in 08 §4). `q` searches tsvector + trigram; `tag` filters by containment. All gallery/profile/scene GETs are anonymous-cacheable (`Cache-Control: public, max-age=60` on published content, `private` on owner reads) — except `sort=following`, which is per-user and always `private`.
 
 ---
 
@@ -258,15 +266,20 @@ Redis token buckets (`@fastify/rate-limit` + redis store), keyed per-IP (anonymo
 | Publish / remix / thumbnail / delete | 30 / day · 60 / day · 60 / day · 60 / day per user |
 | AI generation (M6, 07 §7.3) | 3 / min burst; **20 model calls / day** per user (generate + each repair debit one; exhaustion = `E_AI_BUDGET`); 1 concurrent generation (Redis lock, `E_CONFLICT`) |
 
-Quotas: `API.MAX_ACTIVE_SCENES = 500` non-trashed scenes per user (`E_QUOTA`; doubles as the procgen-spam ceiling) — with ≤ 20 kept revisions × ≤ 1 MB this bounds worst-case per-user storage at a known number. Body caps per §5.3/§5.4. All social-write buckets (M7) reserve names now in `RATE_LIMITS` so abuse posture is designed before the features land (ADR-0004 consequence).
+| Social writes (M7, 08 §2) | Like 500/day · comment 100/day · follow 200/day per user |
+| Challenge entry (M7, 08 §6) | 20/day per user — each entry may enqueue a verification run |
+| Abuse reports (M7, 08 §7.2) | 20/day per user (`MODERATION.MAX_REPORTS_PER_DAY`, kept equal by the verifier) |
+| Run telemetry (M7, 08 §5.6) | 120/h per IP — anonymous players post it too |
+
+Quotas: `API.MAX_ACTIVE_SCENES = 500` non-trashed scenes per user (`E_QUOTA`; doubles as the procgen-spam ceiling) — with ≤ 20 kept revisions × ≤ 1 MB this bounds worst-case per-user storage at a known number. Body caps per §5.3/§5.4. The social-write buckets were reserved here in M4 and went live unchanged in M7, which is what "abuse posture before features" was supposed to buy (ADR-0004 consequence).
 
 ---
 
 ## 9. Redis and background jobs
 
-**Redis** (01 §4): session cache (§6.2), rate buckets (§8), M6 AI per-generation transcripts + concurrency locks (07 §2.2 — TTL 600 s, size-capped, disposable by design), M7 trending zsets later. Nothing in Redis is ever the only copy of anything (a lost AI transcript just ends that generation).
+**Redis** (01 §4): session cache (§6.2), rate buckets (§8), M6 AI per-generation transcripts + concurrency locks (07 §2.2 — TTL 600 s, size-capped, disposable by design), M7 trending zsets (08 §4.2 — rebuilt from Postgres each ranking run, so losing them costs one cycle). Nothing in Redis is ever the only copy of anything (a lost AI transcript just ends that generation).
 
-**BullMQ jobs** (ADR-0004): `purge-trash` (hard-delete soft-deleted scenes/users > 30 d; lineage FKs SET NULL); `prune-revisions` (keep newest 20 per scene; FKs protect head/published, §3.2); `thumb-gc` (orphaned objects after key swaps, §5.4); `token-sweep` (expired `auth_tokens`, `sessions`); `counter-reconcile` (nightly: recompute `like_count`/`comment_count`/`remix_count` from truth, alert on drift); M7 adds `trending-recompute` here.
+**BullMQ jobs** (ADR-0004): `purge-trash` (hard-delete soft-deleted scenes/users > 30 d; lineage FKs SET NULL); `prune-revisions` (keep newest 20 per scene; FKs protect head/published, §3.2); `thumb-gc` (orphaned objects after key swaps, §5.4); `token-sweep` (expired `auth_tokens`, `sessions`); `counter-reconcile` (nightly: recompute `like_count`/`comment_count`/`remix_count`/follower counts from truth, alert on drift). M7 added `verify-scene` (the headless SimCore run, 08 §5.3 — the only CPU-heavy job we own), `trending-recompute` (08 §4.2), and `challenge-close` (freeze boards at `closes_at` + grace, 08 §6.5).
 
 ---
 
