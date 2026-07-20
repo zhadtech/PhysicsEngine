@@ -47,7 +47,9 @@ export type ApiErrorCode =
   | 'E_SCHEMA_NEWER'
   | 'E_IF_MATCH_REQUIRED'
   | 'E_RATE_LIMITED'
-  | 'E_INTERNAL';
+  | 'E_AI_BUDGET'
+  | 'E_INTERNAL'
+  | 'E_AI_UNAVAILABLE';
 
 /**
  * Compile-time proof that every worker error code is a valid API code, so the
@@ -75,7 +77,9 @@ export const ERROR_STATUS: Record<ApiErrorCode, number> = {
   E_SCHEMA_NEWER: 422,
   E_IF_MATCH_REQUIRED: 428,
   E_RATE_LIMITED: 429,
+  E_AI_BUDGET: 429,
   E_INTERNAL: 500,
+  E_AI_UNAVAILABLE: 503,
 } as const;
 
 /** One validation-gate finding — the shape the builder panel consumes (04 §8.5). */
@@ -198,6 +202,11 @@ export const RATE_LIMITS: Record<string, RateBucket> = {
   publish: { per: 'user', limit: 30, windowS: 86_400 },
   remix: { per: 'user', limit: 60, windowS: 86_400 },
   thumbnail: { per: 'user', limit: 60, windowS: 86_400 },
+  // M6 AI generation (07 §7.3). aiCallsDay counts MODEL CALLS (generate +
+  // repair each debit one); exhaustion is E_AI_BUDGET, not E_RATE_LIMITED.
+  // Must satisfy aiCallsDay.limit ≥ 1 + AI.REPAIR_ROUNDS_MAX (verify-backend).
+  aiBurst: { per: 'user', limit: 3, windowS: 60 },
+  aiCallsDay: { per: 'user', limit: 20, windowS: 86_400 },
   // Reserved for M7 (no endpoints yet):
   like: { per: 'user', limit: 500, windowS: 86_400 },
   comment: { per: 'user', limit: 100, windowS: 86_400 },
@@ -381,6 +390,8 @@ export const ROUTES: Record<string, RouteDef> = {
   remixScene: { method: 'POST', path: '/scenes/{sceneId}/remix', auth: 'session' },
   uploadThumbnail: { method: 'PUT', path: '/scenes/{sceneId}/thumbnail', auth: 'owner' },
   listMyScenes: { method: 'GET', path: '/me/scenes', auth: 'session' },
+  aiGenerate: { method: 'POST', path: '/ai/generate', auth: 'session' },
+  aiRepair: { method: 'POST', path: '/ai/generate/{generationId}/repair', auth: 'session' },
   exploreScenes: { method: 'GET', path: '/explore', auth: 'none' },
   getUserProfile: { method: 'GET', path: '/users/{handle}', auth: 'none' },
   listUserScenes: { method: 'GET', path: '/users/{handle}/scenes', auth: 'none' },

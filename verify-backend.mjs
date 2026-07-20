@@ -1,7 +1,8 @@
-// M4 verification (05-BACKEND.md §10): OpenAPI validity, real-PG-grammar DDL,
-// and cross-artifact consistency. Run like verify.mjs: copy these files into a
-// scratch dir — openapi.yaml, schema.sql, scene.schema.json, 05-BACKEND.md,
-// and (flattened from types/) api.ts, scene.ts — then:
+// M4+M6 verification (05-BACKEND.md §10, 07-AI-PIPELINE.md §10): OpenAPI
+// validity, real-PG-grammar DDL, and cross-artifact consistency. Run like
+// verify.mjs: copy these files into a scratch dir — openapi.yaml, schema.sql,
+// scene.schema.json, 05-BACKEND.md, and (flattened from types/) api.ts,
+// scene.ts, ai.ts — then:
 //   npm i ajv yaml @seriousme/openapi-schema-validator pgsql-parser
 //   node verify-backend.mjs
 import { readFileSync } from 'node:fs';
@@ -23,6 +24,7 @@ const yamlText = readFileSync('./openapi.yaml', 'utf8');
 const sql = readFileSync('./schema.sql', 'utf8');
 const apiTs = readFileSync('./api.ts', 'utf8');
 const sceneTs = readFileSync('./scene.ts', 'utf8');
+const aiTs = readFileSync('./ai.ts', 'utf8');
 const doc05 = readFileSync('./05-BACKEND.md', 'utf8');
 const sceneSchema = JSON.parse(readFileSync('./scene.schema.json', 'utf8'));
 
@@ -100,6 +102,31 @@ if (!setEq(routeIds, specIds)) {
     }
   }
   ok(`ROUTES === spec: ${routes.size} operations agree (id, method, path)`);
+}
+
+// --- 3b. M6 AI operations: SSE responses + budget arithmetic (07 §10) ------
+for (const opId of ['aiGenerate', 'aiRepair']) {
+  const loc = specOps.get(opId);
+  if (!loc) {
+    fail(`AI operation ${opId} missing from the spec`);
+    continue;
+  }
+  const op = spec.paths[loc.path][loc.method.toLowerCase()];
+  const media = Object.keys(op.responses?.['200']?.content ?? {});
+  if (!media.includes('text/event-stream')) {
+    fail(`${opId}: 200 must be text/event-stream (07 §2.3), got [${media}]`);
+  } else {
+    ok(`${opId}: 200 streams text/event-stream`);
+  }
+}
+const repairRounds = Number(aiTs.match(/REPAIR_ROUNDS_MAX:\s*(\d+)/)?.[1]);
+const aiCallsDay = Number(apiTs.match(/aiCallsDay:\s*\{\s*per:\s*'user',\s*limit:\s*(\d+)/)?.[1]);
+if (!repairRounds || !aiCallsDay) {
+  fail(`could not extract AI budget constants (REPAIR_ROUNDS_MAX=${repairRounds}, aiCallsDay=${aiCallsDay})`);
+} else if (aiCallsDay < 1 + repairRounds) {
+  fail(`aiCallsDay (${aiCallsDay}) < 1 + REPAIR_ROUNDS_MAX (${repairRounds}) — one full generation cannot fit the daily budget`);
+} else {
+  ok(`AI budget arithmetic: aiCallsDay ${aiCallsDay} ≥ 1 + REPAIR_ROUNDS_MAX ${repairRounds}`);
 }
 
 // --- 4. Error codes: api.ts union ↔ YAML enum ↔ 05 table (+ statuses) ------
