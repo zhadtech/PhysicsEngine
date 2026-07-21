@@ -1,0 +1,63 @@
+# The U9 resolution (10 §6): the same golden hashes must match across ISAs and
+# across the browser triple, or determinism — and therefore leaderboards (D17) —
+# is not real. This is the standing CI proof that extends the single-machine
+# spikes every session ran (S3/S6/S8/S9) into the cross-platform guarantee.
+#
+# Golden hashes are keyed by the engine build + verifier/ranking/perf versions
+# (types/infra.ts CI.GOLDEN_KEY_VERSIONS); an unexplained mismatch is an engine
+# incident, not an expected diff.
+name: determinism-matrix
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Nightly against the browser triple even when nothing changed (driver drift).
+  schedule:
+    - cron: '0 6 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  # Cross-ISA golden hash: headless SimCore (03 §1, environment-free core) run in
+  # Node on x86-64 linux AND arm64 macOS must produce byte-identical state hashes.
+  node-golden:
+    strategy:
+      fail-fast: false
+      matrix:
+        # DETERMINISM_RUNNERS in types/infra.ts — both ISAs are load-bearing for U9.
+        os: [ubuntu-latest, macos-14]
+        node: ['20', '22']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: headless SimCore golden hashes
+        run: echo "packages/engine golden-hash suite (03 §12) — wired when the engine package lands"
+      - name: compare against committed goldens
+        run: echo "fail on any hash != committed golden for this engineVersion"
+
+  # Cross-browser golden hash + the 09 §9 render/perf gate. WASM + SAB transport
+  # must agree with the Node build across Chromium/Firefox/WebKit (BROWSER_TRIPLE).
+  browser-golden:
+    strategy:
+      fail-fast: false
+      matrix:
+        # BROWSER_TRIPLE in types/infra.ts.
+        browser: [chromium, firefox, webkit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: install Playwright browsers
+        run: echo "npx playwright install --with-deps ${{ matrix.browser }}"
+      - name: browser SimCore golden hashes
+        run: echo "same golden scenes in-browser; hash must equal the Node golden"
+      - name: perf regression gate (09 §9)
+        run: echo "per-tier frame p95 + draw-call ceiling vs committed PERF_VERSION baselines"

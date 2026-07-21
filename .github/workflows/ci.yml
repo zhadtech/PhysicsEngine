@@ -1,0 +1,85 @@
+# Everyday gate (10 §6). Runs on every push/PR: typecheck, the schema/backend
+# verify suites that these spec sessions built, and unit tests. The heavy
+# cross-platform determinism + browser matrix lives in determinism-matrix.yml so
+# this stays fast; a release is gated on both (types/infra.ts DEPLOY.gatedByCi).
+#
+# Paths target the planned monorepo layout (00-PROGRESS §5); until packages exist
+# the verify-* jobs run against the repo-root spec artifacts they already check.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # Strict tsc with the flags every session verifies under (physics-sandbox-session-workflow).
+      - name: tsc (strict)
+        run: npx -p typescript tsc --strict --exactOptionalPropertyTypes --noUncheckedIndexedAccess --noEmit types/*.ts
+
+  verify-scene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # ajv-strict scene-format corpus (verify.mjs reads scene.schema.json + 02 examples).
+      - name: scene-format verify
+        run: |
+          npm i --no-save ajv
+          node verify.mjs
+
+  verify-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # OpenAPI 3.1 + real PG grammar (pgsql-parser) + three-way error-code equality.
+      - name: backend verify
+        run: |
+          npm i --no-save ajv yaml @seriousme/openapi-schema-validator pgsql-parser
+          node verify-backend.mjs
+
+  verify-infra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # CI-workflow structure, U9 matrix ↔ types/infra.ts, migration runner, isolation headers.
+      - name: infra verify
+        run: |
+          npm i --no-save ajv yaml
+          node verify-infra.mjs
+
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: unit tests
+        run: echo "packages/*/test — wired when implementation lands (00-PROGRESS §5)"
