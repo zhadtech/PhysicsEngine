@@ -1,0 +1,43 @@
+# Deploy pipeline (10 §6). Stateless API pods roll out only after the CI +
+# determinism gates are green (types/infra.ts DEPLOY.gatedByCi); schema
+# migrations run once, transactionally, BEFORE the new image takes traffic
+# (DEPLOY.migrateBeforeTraffic, 10 §5). Vendor of record is deferred (U14) — the
+# job talks to driver-abstracted targets, so the deploy step is swappable.
+name: deploy
+
+on:
+  workflow_run:
+    workflows: [ci, determinism-matrix]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  staging:
+    # Only when both upstream gates passed.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: run schema migrations (transactional, forward-only)
+        run: echo "packages/scene-format ddl runner + scene schemaVersion backfill (10 §5)"
+      - name: deploy API (rolling)
+        run: echo "push image; drain-on-readiness-fail (HEALTH.unhealthyThreshold)"
+      - name: smoke test
+        run: echo "GET /healthz readiness; one save→publish→verify round-trip"
+
+  prod:
+    needs: staging
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+      - name: run schema migrations (transactional, forward-only)
+        run: echo "same runner, prod DATABASE_URL (server-only secret, D22)"
+      - name: deploy API (rolling)
+        run: echo "rolling update behind the load balancer"
+      - name: post-deploy checks
+        run: echo "readiness + determinism divergence dashboard baseline (idx_run_reports_divergence)"

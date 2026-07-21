@@ -1,251 +1,235 @@
 # 10 — Infrastructure & Deployment
 
-**Status:** Accepted (Session 10, 2026-07-21) — normative for how the M0–M8 system is built, shipped, and operated
-**Implements:** the brief's technical/deployment goals; ADR-0003/0004 (stacks), 01 §4 (stateless backend), R5
-**Consumes:** `01-ARCHITECTURE.md` (§3 threads/transport, §4 backend, §6 versioning), `05-BACKEND.md` (§1 stateless pods, §6 auth, §9 jobs, §12 U14/U15), `08-COMMUNITY.md` (§4.2 trending, §5 verification, §5.6 divergence, §7 moderation), `09-PERFORMANCE.md` (§8 read path, §9 measurement harness), `03-SIMULATION-CORE.md` (§12 determinism suite)
-**Companion file:** `types/infra.ts` (environments, isolation headers, CI matrix, secret inventory, observability budgets, migration/erasure policy — compile-tied to the constants they must not drift from)
-**Consumed by:** first implementation (the actual pipelines and manifests); M10 (collaboration adds stateful services on this base)
+**Status:** Accepted (Session 10, 2026-07-21) — normative for CI/CD, hosting, environments, and operations
+**Implements:** the brief's technical/deployment goals; 01 §4 (thin stateless backend), R5 (SAB isolation/embeds)
+**Consumes:** `05-BACKEND.md` (topology, secrets, jobs), `08-COMMUNITY.md` (§5 verification, §5.6 divergence signal), `09-PERFORMANCE.md` (§8 read-path, §9 perf harness), `03-SIMULATION-CORE.md` (§12 determinism suite)
+**Companion files:** `types/infra.ts` (environments, CI matrix, migration/isolation/observability constants — compile-tied); `.github/workflows/{ci,determinism-matrix,deploy}.yml`; `verify-infra.mjs`
+**Consumed by:** first implementation (this is the last design milestone before code); M10 (collaboration/monetization ride this topology); M11 (roadmap)
 
 ---
 
-## 1. Scope and principles
+## 1. The one shape everything rests on
 
-M9 is **operational, not architectural**: it says how the existing surface is deployed, tested, observed, and kept safe — it adds **no new API operation, DB table, error code, or engine constant** (`openapi.yaml`/`schema.sql`/`types/protocol.ts` are untouched). The only build-time additions are `types/infra.ts` and this document; the only runtime additions are HTTP response *headers*, CI pipelines, dashboards, and background policy.
+Every prior milestone earned the same property, and this document only has to *operate* it:
 
-1. **Stateless and 12-factor.** Every API pod is interchangeable (05 §1.5): all state lives in Postgres, Redis, and object storage, all config in the environment (§8). Horizontal scale is "run more pods."
-2. **The expensive work is the user's device.** Simulation runs client-side (01 §1); the one CPU-heavy job we own is `verify-scene`, a background queue that is never in a request path (09 §8). Our server cost profile is a content/social app, and the infra reflects that.
-3. **Vendor-neutral by module boundary (U14).** Object storage, CDN, and transactional email sit behind interfaces; the concrete provider is a deploy-time choice, swappable without touching call sites. This document commits to *contracts*, not brands.
-4. **Determinism is an operational invariant, not just a design one.** The CI matrix (§6) and the standing divergence dashboard (§7) exist to *catch* a per-platform physics divergence in production, because a silent one would corrupt leaderboards. This is the operational half of D2/D7/D17.
-5. **Safe by default per environment.** Only prod is search-indexable; secrets never enter a client bundle (§8); migrations are forward-only and dry-run on staging first (§4.2).
+> The expensive work — simulation — runs on the **user's device**. The backend is a plain content/social app with exactly **one** CPU-heavy job we own: the leaderboard verification queue (08 §5), and even that is a background worker, never in a request path (01 §1).
+
+So the infrastructure is deliberately unremarkable: stateless API pods behind a load balancer, managed Postgres + Redis, object storage + CDN, and a queue worker. There is no GPU fleet, no physics tier, no fan-out write path (D21). The three things that are *not* unremarkable — and are therefore what this document spends its words on — are:
+
+1. **Determinism is a cross-platform promise, and CI is the only place it is proven** (U9). A leaderboard is only meaningful if a run computes the same hash on every machine that plays it. §6.
+2. **The client needs `SharedArrayBuffer`, which needs COOP/COEP, which breaks naïve embeds** (U5/R5). §3.
+3. **Two independent version axes migrate forward** — the SQL schema and the scene `schemaVersion` — and a bad migration is the one irreversible mistake this otherwise-stateless system can make. §5.
+
+Everything else (hosting, secrets, observability, account lifecycle) is standard practice, specified here so implementation has no open questions.
 
 ---
 
-## 2. Topology
+## 2. Topology (D22)
 
 ```mermaid
-flowchart TB
+flowchart LR
     subgraph Edge
-        CDN["CDN — immutable published docs<br/>+ thumbnails/assets (COOP/COEP-aware)"]
+      CDN["CDN<br/>immutable scene docs,<br/>thumbnails, static app"]
     end
-    subgraph Web["Web app (static SPA + SSR share pages)"]
-        SPA["React app / /s/{id} player<br/>COOP:same-origin + COEP:require-corp"]
+    subgraph App["Stateless — horizontally scalable"]
+      API["Fastify API pods<br/>(N replicas)"]
+      WRK["Verification + jobs worker<br/>(BullMQ, 08 §5.5)"]
     end
-    subgraph API["Stateless API pods (Fastify) — N replicas"]
-        F1["pod"]:::pod
-        F2["pod"]:::pod
+    subgraph Data["Managed / stateful"]
+      PG[("PostgreSQL<br/>primary (+read replicas later)")]
+      RED[("Redis<br/>sessions cache, rate limits,<br/>trending zset, job queue")]
+      OBJ[("Object storage<br/>thumbnails, exports")]
     end
-    subgraph Workers["BullMQ worker pool"]
-        VW["verify-scene (CPU-bound, concurrency 2/pod)"]
-        JW["trending / purge / prune / thumb-gc / token-sweep / reconcile / challenge-close"]
-    end
-    PG[("PostgreSQL 16<br/>primary (+ read replica: D21 rung)")]
-    RED[("Redis — sessions/rate/trending zset/AI transcripts")]
-    OBJ[("Object storage — thumbnails/assets")]
-
-    SPA -->|"/v1 JSON, session cookie"| API
-    CDN --> SPA
-    OBJ --> CDN
+    User["Browser<br/>(all physics here)"] -->|"HTTPS /v1"| API
+    User -->|"static + docs"| CDN
+    CDN --> OBJ
     API --> PG
     API --> RED
-    API --> OBJ
-    Workers --> PG
-    Workers --> RED
-    Workers --> OBJ
-    classDef pod fill:#eef;
+    WRK --> PG
+    WRK --> RED
+    OBJ --> CDN
 ```
 
-- **Web app** is static assets (SPA) plus a thin SSR layer for `/s/{id}` OG metadata (05 §4.3). It is served with the isolation headers (§3) so the simulation worker gets `SharedArrayBuffer`. It talks only to the API's `/v1` surface.
-- **API pods** are stateless Fastify (`API_STATELESS`); any pod serves any request. `minApiReplicas` is 1 in dev/staging, ≥ 2 in prod (`ENVIRONMENTS`).
-- **Worker pool** runs the 05 §9 BullMQ jobs. `verify-scene` is the only CPU-heavy one (`VERIFY.WORKER_CONCURRENCY = 2` per pod, 08 §5.3); it scales with publish volume, independent of read traffic (09 §8).
-- **Postgres 16** primary; the D21 escalation ladder adds a read replica and then the object-storage doc hatch *only when a trigger fires* (§9). **Redis** holds nothing that is the only copy of anything (05 §9). **Object storage + CDN** carry content-addressed thumbnails/assets, cacheable forever.
+- **API pods are stateless** (sessions live in Postgres + a Redis read-through cache, D12) → scale horizontally, roll freely, no sticky routing. Readiness (`HEALTH.path` = `/healthz`, taken verbatim from `api.ts ROUTES.healthCheck`) additionally probes Postgres + Redis reachability; the load balancer drains a pod after `HEALTH.unhealthyThreshold` failed probes.
+- **One worker deployment** runs the BullMQ jobs already inventoried in 05 §9 (purge, prune, thumb-GC, token sweep, counter reconcile, trending recompute) plus the M7 verification queue. `WORKER_CONCURRENCY` (2, pinned to cores, from `VERIFY`) is the only knob; capacity is ~17 CPU-min/day at 10 k publishes (09 §8).
+- **CDN fronts immutable content.** A published revision is content-addressed (05 §3), so its document is cache-forever at the edge (`READPATH.SCENE_DOC_CDN_S` = 1 y); thumbnails and the static app bundle likewise. This is what keeps the origin's read load flat under virality (D21).
 
-`types/infra.ts` fixes the module boundary (`TOPOLOGY.VENDOR_NEUTRAL_MODULES = objectStorage · cdn · email`) and the read-scale ladder (`READ_SCALE_LADDER`), so the U14 vendor decision changes a config value, not the design.
+**Vendor posture (U14):** the design is cloud-agnostic 12-factor. Each stateful dependency sits behind a driver interface (`OBJECT_STORAGE_KEY`, `EMAIL_API_KEY`, `DATABASE_URL`, `REDIS_URL` in `SECRETS`), so the concrete vendor is a deployment choice, not an architectural one. The recommended default for MVP is a single-provider managed stack (managed Postgres + managed Redis + S3-compatible storage + a CDN in front), chosen at implementation; nothing above depends on which. Object storage / CDN and transactional email (SPF/DKIM deliverability) are the only two picks with real lock-in, and both are isolated to their driver.
 
 ---
 
-## 3. Cross-origin isolation & the SAB gate (R5 / U5)
+## 3. Cross-origin isolation & embeds (U5 / R5)
 
-The simulation worker's primary transport is a `SharedArrayBuffer` (03 §5.4). A browser only exposes `SharedArrayBuffer` when the document is **cross-origin isolated**, which requires two response headers on the HTML document. This session validated the mechanism live (§11, spike I1) rather than trusting the spec:
+The simulation worker's primary transport is a `SharedArrayBuffer` (01 §3.1, `SAB`). Browsers only expose SAB when the document is `crossOriginIsolated`, which requires two response headers on the app's own pages:
 
-| Top-level document headers | `self.crossOriginIsolated` | `SharedArrayBuffer` |
+| Header | Value (`ISOLATION`) | Why |
 |---|---|---|
-| `COOP: same-origin` **and** `COEP: require-corp` | **`true`** | available (`new SharedArrayBuffer(8)` succeeds) |
-| either header missing | **`false`** | **`undefined`** — constructor throws "not defined" |
+| `Cross-Origin-Opener-Policy` | `same-origin` | Severs the window from cross-origin openers |
+| `Cross-Origin-Embedder-Policy` | `credentialless` | Grants isolation **without** requiring a CORP header on every cross-origin subresource — so CDN assets, thumbnails, and OAuth redirects load normally. (`require-corp` also grants isolation but would force CORP on every asset; `credentialless` is the pragmatic choice.) |
 
-So SAB is gated *entirely* on these two headers, encoded in `CROSS_ORIGIN_ISOLATION`. Two consequences follow, and the spike settled both:
+The predicate is exact and testable (`grantsIsolation`, proven in `verify-infra.mjs` §F): isolation is granted **iff** COOP is `same-origin` and COEP is `credentialless` or `require-corp`.
 
-1. **The fallback is a smoothness fallback, never a correctness one.** The same shared harness produced the **byte-identical** state hash `e4dc73ff` on the isolated (SAB) and non-isolated (transferable-`ArrayBuffer` fallback, 03 §5.3) loads (spike I2b). The WASM computes the same run regardless of transport; SAB only removes per-frame allocation and decouples the renderer (09 §5.2). A page that cannot isolate still simulates correctly — it just jitters more under load.
-2. **Cross-origin embeds of `/s/{id}` need a plan.** Under `require-corp`, every subresource must be same-origin or carry `Cross-Origin-Resource-Policy` (CDN assets do: `ASSET_CORP_VALUE = cross-origin`). A third party embedding the player in an `<iframe>` from *their* origin would otherwise lose isolation. The embed posture: serve the player with **`COEP: credentialless`** (`COEP_VALUE_EMBED`) — it keeps `crossOriginIsolated = true` inside the frame by loading cross-origin subresources without credentials, so SAB survives an embed without demanding CORP from every asset. If a specific embedder still can't isolate, the player degrades to the fallback transport (point 1) and runs correctly, slightly less smoothly. This closes R5 and U5: the mechanism is proven, the default and embed header sets are fixed, and the failure mode is graceful.
+**The embed problem and its resolution.** A third-party page that embeds our player in an `<iframe>` cannot make *our* document isolated unless it also sets these headers on *itself* — most won't. R5 flagged this as an open sharing-reach question. The resolution is that **SAB is an optimization, not a requirement**:
 
-Isolation is required on **every** environment (`ENVIRONMENTS[*].crossOriginIsolated = true`) — determinism transport is not something a stage gets to weaken.
+- The player probes `self.crossOriginIsolated` at boot. Isolated → SAB triple-buffer. Not isolated → the transferable-`ArrayBuffer` fallback (double-buffered `postMessage`), which 09 §5 (spike P2) measured at ~16 µs/frame copy versus ~2 µs SAB write — both < 0.1 % of the frame budget. **The run is byte-identical either way; only the transport differs.** Determinism does not depend on isolation.
+- First-party pages (`app.example`, the `/s/{id}` share page) always send the headers and get SAB.
+- Embeddable contexts advertise `?embed` (`ISOLATION.EMBED_QUERY_FLAG`) so the client skips the SAB probe and goes straight to the fallback, avoiding a console warning and a wasted feature-detect.
 
----
-
-## 4. Environments & migrations
-
-### 4.1 Three environments
-
-`ENV_IDS = dev · staging · prod` (`ENVIRONMENTS`, exhaustive by compile proof):
-
-| | dev | staging | prod |
-|---|---|---|---|
-| `robotsIndexable` | ✕ | ✕ | ✅ (only prod; others `X-Robots-Tag: noindex`) |
-| `minApiReplicas` | 1 | 1 | ≥ 2 |
-| `emailDeliverability` | console log | real (SPF/DKIM) | real |
-| `aiProxyDefaultOn` | ✕ (paste-only, 07 §2.1) | ✕ | ✅ |
-| workers / isolation | on / required | on / required | on / required |
-
-Staging runs the full stack against a sanitized prod snapshot; it is where a migration and a determinism-baseline change are proven before prod.
-
-### 4.2 Migrations — forward-only, and the three-version rule
-
-Two migration systems, deliberately separate (`MIGRATIONS`):
-
-- **Database:** a monotonically increasing integer sequence, each migration in one transaction, **never edited after landing** (`DB_FORWARD_ONLY`) — a fix is a new migration. `STAGING_DRY_RUN_REQUIRED` gates prod. The `schema.sql` in this repo is the *target* DDL and the verify-suite's oracle; the runner's job is to move any live database to it.
-- **Scene format:** `schemaVersion` migrations (02 §9) run **in the app/gate at read time** (05 §5.3 step 4), not in the database — a stored document is migrated forward when someone opens it, never in a batch. A document newer than the server's `scene-format` is deploy lag, surfaced as `E_SCHEMA_NEWER`, and is **never** migrated backward (`NO_BACKWARD_MIGRATION`).
-
-`VERSIONS` operationalizes 01 §6's *three independent version numbers* by anchoring each to its single source: `api` = `API_VERSION` (URL `/v1`), `sceneSchema` = `SCHEMA_VERSION`, `protocol`/engine identity from `PROTOCOL_VERSION` + `SIM`, plus `perfBaseline`/`verifier`/`ranking`. A deploy validates that a rolling API fleet spanning two `/v1`-compatible builds still agrees on all three — the golden-hash suite (§6) is exactly that agreement for the engine version.
+So embeds work everywhere, at a transport cost that the M8 spike proved is negligible. Isolation is required in `dev`/`staging`/`prod` for first-party pages (`ENVIRONMENTS[*].crossOriginIsolated = true`) and simply absent for third-party embeds.
 
 ---
 
-## 5. CI/CD
+## 4. Environments, configuration & secrets
 
-### 5.1 The determinism matrix — U9 resolved (design) and made a standing signal
+Three environments (`ENV_IDS`): `dev` (local, seed data, AI off), `staging` (real infra shape, seed/anonymized data, AI live against a low quota), `prod` (real data, erasure jobs enabled). The web origin and the four booleans that differ are in `ENVIRONMENTS`.
 
-U9 has been the open cross-platform-determinism risk since M2. M9 closes it in two moves — a CI gate for our own builds, and a production dashboard for machines we don't own:
+**Configuration** is environment variables only (12-factor); no config is baked into an image, so the *same* image promotes dev→staging→prod. The scene format's `schemaVersion`, the `engineVersion` pin (`ENGINE_BUILD`), and all budget constants live in the typed source (`types/*.ts`), not in env — they are code, versioned and CI-checked, never per-environment toggles.
 
-**CI gate (`CI`).** On every commit:
-- **Golden-hash equality within an `engineVersion`** across `NODE_PLATFORMS = linux-x64 · macos-arm64` (× `NODE_MAJORS = 22 · 24`), running the headless Node SimCore `DETERMINISM_SUITE` (03 §12: `double-run`, `snapshot-restore`, `command-boundary`, `cross-platform-golden`). A hash that differs across platforms fails the build.
-- **The browser triple** `BROWSERS = chromium · firefox · webkit` via Playwright — the same golden scenes run in-browser and must match the Node goldens. This matrix also carries the 09 §9 render/perf harness (draw calls, per-tier frame p95), so U25's "real target hardware + browser triple" baselines land here. The triple is exactly three engines (compile proof).
+**Secrets** (`SECRETS`, names only — no value is ever committed): all are `server-only`, grouped by the decision that makes them so.
 
-**Production signal.** `POST /scenes/{id}/runs` records whether a real player's `finalHash` matched our verifier's (08 §5.6); `idx_run_reports_divergence` is the dashboard. Anonymous players post too, because divergence data from hardware we can't buy is the data CI structurally cannot produce. A mismatch is an engine incident opened against us — ranking is unaffected because only our number ranks (D17).
-
-The spike gave the first empirical data point behind this design: Node (darwin-arm64) and Chromium (darwin-arm64) produced **byte-identical** hashes on the pinned D7 build (§11, I2). One engine, one ISA — not the full matrix, which is why U9 narrows to "execute it in CI" rather than closing outright — but a positive signal that the shared-WASM-in-Node verifier (03 §1) and the browser client agree, which is the whole basis of D17.
-
-### 5.2 Perf gates and artifact consistency
-
-- **Perf regression** (`PERF_REGRESSION_RATIO = 1.15`, echoing 09 §9): any metric > 15 % off its committed baseline for `PERF_BASELINE_VERSION` = `PERF_VERSION` fails the build; a deliberate change updates the baseline in the same commit (the diff *is* the perf review).
-- **Artifact-consistency suites** (`ARTIFACT_CONSISTENCY_SUITES`): `verify.mjs` (02 §9 schema/example corpus) and `verify-backend.mjs` (05 §10 — OpenAPI ↔ `ROUTES` ↔ error table, `schema.sql` under the real PG parser, DDL caps ↔ `LIMITS`) run on every commit, alongside `tsc --strict` over `types/*.ts`. These are the machine checks every prior milestone built; CI just makes them a merge gate.
-
-### 5.3 Deploy pipeline
-
-Build → the §5.1/§5.2 gates → deploy to staging → migration dry-run + smoke → promote to prod behind a rolling update (stateless pods, §2). Rollback is redeploy of the previous image; because migrations are forward-only, a rolled-back app build must still read the migrated schema — so migrations are written to be **backward-compatible for one release** (expand/contract), never a destructive rename in the same deploy that removes the old reader.
-
----
-
-## 6. Observability
-
-Alerts are **tied to the budgets they watch** (`OBSERVABILITY`), so changing a budget moves its alarm automatically rather than leaving a stale literal:
-
-| Dashboard / alert | Threshold | Source it tracks |
+| Secret | Rotation | Server-only because |
 |---|---|---|
-| **Determinism divergence** (U9) | client≠server hash rate > `DIVERGENCE_RATE_ALERT` (0.1 %) | `idx_run_reports_divergence` (08 §5.6) |
-| **Verify queue depth** | backlog > `VERIFY_QUEUE_DEPTH_ALERT` (= 200 × `VERIFY.WORKER_CONCURRENCY`) | the only CPU-heavy job (08 §5.5) |
-| **Verify wall p99** | approaching `VERIFY_WALL_BUDGET_MS` (20 s kill switch) | 08 §5.5 budget |
-| **Trending job health** | last success older than `TRENDING_MAX_LAG_S` (= 3 × `TRENDING.RECOMPUTE_S`) | 08 §4.2 cadence |
-| **Perf regression** (per tier, browser triple) | > baseline × 1.15 | 09 §9 harness |
-| **RUM frame telemetry** (U24) | per-tier p95 frame time, sampled `RUM_FRAME_SAMPLE_RATE` | feeds the adaptive-quality thresholds |
+| `AI_PROVIDER_KEY` | 90 d | **D15** — the AI proxy holds provider keys; BYO-key was rejected. The client never sees it. |
+| `SESSION_SECRET`, `OAUTH_{GOOGLE,GITHUB}_SECRET` | 30 / 180 d | **D12** — DB sessions + PKCE OAuth; secrets sign/exchange server-side only. |
+| `DATABASE_URL`, `REDIS_URL`, `OBJECT_STORAGE_KEY`, `EMAIL_API_KEY` | 90 d | **D22** — datastore + vendor driver credentials. |
 
-Standard golden signals (latency/error-rate/saturation per pod, DB/Redis health, job success rates) sit under these. The two project-specific ones are the divergence dashboard (the U9 production channel) and the verify-queue depth (the one place our CPU cost lives).
-
-**Ranking shadow-tuning (U19/U21).** Trending parameters are unvalidated without real traffic. The mechanism: a candidate `RANKING_VERSION` scores the same candidate set **in parallel** with the live one; the two orderings are compared on the dashboard before any flip. `RANKING_VERSION` (08) is the safety latch — nothing changes user-visible order until a shadow run justifies it. Same pattern gates a `VERIFIER_VERSION` bump (re-verify lazily, 08 §5.4) and a `PERF_VERSION` baseline change.
+Secrets are injected from the platform's secret manager at deploy; rotation is a redeploy with the new value (sessions survive a `SESSION_SECRET` rotation via a two-key overlap window). The determinism supply chain is itself a secret-adjacent concern: `ENGINE_BUILD` is exact-pinned (D7) and the lockfile is committed, so a dependency swap that could change a hash cannot happen silently — it is a reviewed version bump that re-keys the goldens (§6).
 
 ---
 
-## 7. Secrets & configuration
+## 5. Schema migrations — the two axes
 
-Config is environment (12-factor); secrets live in a secret manager, are **never logged, and never enter a client bundle**. `CONFIG_KEYS` is the full inventory, each tagged `secret`|`config` and `serverOnly`:
+This stateless system has exactly one irreversible operation, and it is a migration. Both axes are **forward-only** and run **before** new code takes traffic (`DEPLOY.migrateBeforeTraffic`).
 
-- **Auth (D12):** `SESSION_SECRET`; per OAuth provider a `{PROVIDER}_OAUTH_CLIENT_ID` + `_CLIENT_SECRET`. This is the load-bearing compile proof — the provider set is derived from `AUTH.OAUTH_PROVIDERS`, so adding a provider without its two keys fails compilation naming the missing key (`OAUTH_SECRETS` / `CONFIG_KEYS` coverage, §11 negative test N2).
-- **AI (D15):** `AI_PROVIDER_API_KEY` is `secret` + `serverOnly` — the proxy holds provider keys server-side and BYO-key is rejected (07 §2.1), so this key reaching a client build is a bug by definition.
-- **Data stores:** `DATABASE_URL`, `DATABASE_REPLICA_URL` (the D21 rung), `REDIS_URL`.
-- **Vendor modules (U14):** `OBJECT_STORAGE_*`, `EMAIL_API_KEY`; the two public, bundle-safe values `CDN_BASE_URL` and `APP_ORIGIN` (the CORS/`__Host-`-cookie origin pin, 05 §6.6) are the only `serverOnly: false` entries.
+### 5.1 SQL DDL (`MIGRATION.ddlRunner` = transactional-forward-only)
 
-A deploy validates that every required key is present *before* a pod serves traffic (fail fast, not at first request).
+Ordered, numbered migration files applied by a Flyway-style runner inside a transaction, recorded in a `schema_migrations` ledger table. A rollout is gated on the migration succeeding; a failed migration aborts the deploy with the old image still serving. DDL is written **expand-then-contract** so a migration is always compatible with the *currently running* code (add column nullable → deploy code that writes it → backfill → deploy code that reads it → drop the old) — this is what lets a rolling deploy never see a schema the running pod doesn't understand.
 
----
+### 5.2 Scene `schemaVersion` (`MIGRATION.currentSchemaVersion` = `SCHEMA_VERSION` = 1)
 
-## 8. Data lifecycle: deletion, export, erasure (U15)
+A scene document carries its own `schemaVersion`. The **migration runner** (reference implementation proven in `verify-infra.mjs` §E) chains single-step migrations from a document's version up to the app's current version, then re-validates against `scene.schema.json`:
 
-`DATA_LIFECYCLE` decides the GDPR-shaped policy 05 §12 left open. Account erasure is not a cascade — it respects that a *remix is an independent work by another author*:
-
-| On account erasure | Action | Why |
-|---|---|---|
-| the user's own scenes | `purge` (hard delete rows + thumbnail objects) | their content, their right |
-| lineage pointer from others' remixes | `null-pointer` | mirrors `schema.sql` `remixed_from ON DELETE SET NULL` |
-| downstream remixes themselves | `survive` | someone else's work; nulling the pointer is enough |
-| the user's comments | `anonymize` to a tombstone | preserves thread structure (08 §2.3) without their identity |
-
-- **Self-serve export** (`EXPORT_FORMAT = application/json`): the current head document of every owned scene plus the profile, as one JSON bundle. Documents are already the portable unit (ADR-0005).
-- **SLA:** erasure completes (all purge/GC jobs run) within `ERASURE_SLA_DAYS` (30) of a confirmed request. Retention windows are anchored to their sources: `TRASH_TTL_DAYS` = `API.TRASH_TTL_DAYS`, `APPEAL_RETENTION_DAYS` = `MODERATION.APPEAL_WINDOW_DAYS`.
-
-The jobs to execute this already exist (`purge-trash`, `thumb-gc`, `token-sweep`, 05 §9); M9 supplies the *policy* those jobs enforce. **U15 resolved.**
-
----
-
-## 9. Operations: read-path scaling & moderation
-
-### 9.1 Read-path escalation (D21, operational view)
-
-The read path is a plain content/social app today (09 §8). The escalation ladder (`TOPOLOGY.READ_SCALE_LADDER`) is **staged and trigger-gated**, so scale-out is planned, not reactive:
-
-1. **`materialized-feed`** — materialize heavy-follower timelines when p95 > `FEED_P95_REVISIT_MS` (150 ms) or median followee set > `FEED_FOLLOWEE_REVISIT` (2 000) (09 §8, 08 §2.5). Endpoint shape unchanged.
-2. **`read-replicas`** — add `DATABASE_REPLICA_URL` for listings when the primary's read CPU is the bottleneck; longer edge TTLs.
-3. **`object-storage-docs`** — the 05 §2 escape hatch (p95 doc > 256 KB), contained to `scene_revisions`.
-
-Each rung is a config/infra change with a named trigger, never an API redesign.
-
-### 9.2 Moderation operations (U22)
-
-M7 fixed the moderation *data model and effects* (D19: `visible`/`limited`/`removed`, 404-not-403, appeals); M9 fixes the *operations*:
-
-- **Queue tooling:** a staff-only view over `content_reports`, ordered by the `AUTO_LIMIT_REPORTS` (5 distinct reporters ⇒ auto-`limited` pending review, 08 §7.2) signal; actions map to the D19 state transitions and write an **append-only audit log** (who, when, from→to state, reason).
-- **Human policy:** v1 moderation is staff-decided (user-authored challenges deferred, U23; AI/hand-typed text share this queue, 07 §7.1). The org owns the roster and an SLA target; the automated path can only ever *limit* reach, never amplify (D19).
-- **Retention:** a `removed` item is kept `APPEAL_RETENTION_DAYS` (30) for appeal, then purged. **U22 narrowed** — tooling, audit, and policy shape are fixed; staffing and SLA numbers are an org decision at launch.
-
----
-
-## 10. Disaster recovery & backups
-
-Posture (concrete numbers pending the vendor, U26): Postgres is the only durable system of record that isn't reconstructible — **daily base backups + WAL/PITR**; Redis is a cache and reconstructible (05 §9), so it needs no backup, only warm-restart tolerance; object storage relies on the provider's durability + versioning. The verification cache (`scene_verifications`) is rebuildable by re-running the deterministic verifier, so it is not on the critical restore path. Restores are rehearsed on staging (§4.1).
-
----
-
-## 11. Spike record (2026-07-21, Session 10)
-
-Environment: darwin-arm64, Node 24, in-app Chromium (Electron 42 / Chrome 148), `@dimforge/rapier2d-deterministic-compat@0.19.3` (D7 build), scratchpad only (not committed — S3 precedent). A tiny Node static server served a shared determinism harness (600 steps, 9 dynamic bodies: floor + 25° ramp + CCD marble + 8-domino run) with COOP/COEP toggled by query flag; the same harness ran in Node and in the browser.
-
-| Experiment | Result |
-|---|---|
-| **I1 cross-origin isolation** | `COOP: same-origin` + `COEP: require-corp` ⇒ `crossOriginIsolated === true`, `new SharedArrayBuffer(8)` succeeds. Drop the headers (`?iso=0`) ⇒ `crossOriginIsolated === false`, `SharedArrayBuffer` is `undefined` (constructor throws "not defined"). The SAB transport is gated *entirely* on the two document headers — R5/U5 mechanism validated live |
-| **I2 determinism, browser vs Node** | same harness, same pinned wasm: **Node = Chromium = `e4dc73ff`, byte-identical**. First cross-runtime determinism data point in the project (all prior spikes were Node-only, even S8's cross-*process*). One engine + one ISA — a positive signal for the §5 matrix and D17, not the full triple/cross-ISA confirmation (that is CI-time, U9) |
-| **I2b determinism vs isolation** | isolated (SAB) and non-isolated (fallback-transport) browser loads produced the **same** hash `e4dc73ff` ⇒ SAB is a transport smoothness optimization, never a correctness input; a cross-origin embed that loses SAB still simulates bit-identically (confirms 09 §5.2 and the §3 embed posture) |
-
-`types/infra.ts`: strict `tsc --exactOptionalPropertyTypes --noUncheckedIndexedAccess` green on all **ten** type files. **3/3 negative compile tests bite** — renaming `ENVIRONMENTS.prod` (names both `prod` missing and the extra key), dropping `GITHUB_OAUTH_CLIENT_SECRET` from `CONFIG_KEYS` (`CONFIG_KEYS misses OAuth env key: "GITHUB_OAUTH_CLIENT_SECRET"`), and dropping `webkit` from `CI.BROWSERS` (browser-triple cardinality ≠ 3).
-
----
-
-## 12. Decisions & open issues
-
-**Decided here:**
-- **D22 — Deployment topology & the cross-origin isolation posture (U5).** Stateless 12-factor pods over Postgres/Redis/object-storage+CDN with a vendor-neutral module boundary (U14) and a trigger-gated read-scale ladder (D21); `COOP: same-origin` + `COEP: require-corp` on every isolated document, `credentialless` for embedded players, `CORP: cross-origin` on CDN assets — the SAB gate validated live (spike I1), the fallback proven sim-identical (I2b); three environments with forward-only, staging-dry-run migrations and the 01 §6 three-version rule anchored to its sources. Encoded in `types/infra.ts` (`ENVIRONMENTS`, `CROSS_ORIGIN_ISOLATION`, `MIGRATIONS`, `VERSIONS`, `TOPOLOGY`).
-- **D23 — CI/CD determinism+perf matrix (U9) & operational posture.** A cross-platform golden-hash gate (linux-x64 + macos-arm64 × Node LTS) plus the Chromium/Firefox/WebKit Playwright triple carrying the 09 §9 perf/render harness, wired to the existing `verify.mjs`/`verify-backend.mjs`/`tsc` suites; observability alerts tied by construction to the budgets they watch (divergence, verify-queue, trending lag, per-tier perf); ranking/verifier/perf changes gated by shadow-tuning behind their version latches (U19/U21/U24); the account-erasure/export policy (U15) and moderation operations (U22). Encoded in `CI`, `OBSERVABILITY`, `CONFIG_KEYS`, `DATA_LIFECYCLE`.
-
-**Resolved / narrowed:**
-- **U5 ✅ resolved** — isolation headers proven to gate SAB (I1), embed posture (`credentialless`) fixed, fallback proven correct (I2b).
-- **U15 ✅ resolved** — erasure policy (own scenes purge, lineage null, remixes survive, comments anonymize), JSON export, 30-day SLA (§8).
-- **U9 → resolved (design), narrowed to execution** — the CI matrix and the standing divergence dashboard are specified; the spike gives a first byte-identical Node≡Chromium data point; the full triple/cross-ISA confirmation is the CI run at first implementation.
-- **U14 → narrowed** — vendor picks stay deferred but now sit behind fixed module interfaces + the `CONFIG_KEYS` inventory; concrete selection is a deploy-time value, not a design gap.
-- **U22 → narrowed** — moderation tooling, audit log, and policy shape fixed (§9.2); staffing and SLA are an org decision at launch.
-- **U19/U21/U24/U25** → mechanisms in place (shadow-tuning latches §6, RUM telemetry, the browser-triple perf harness §5); each still needs real traffic/devices at/after launch.
-
-**Opened:**
-- **U26 (new):** concrete DR/backup targets (RPO/RTO, PITR retention window) and secret-rotation cadence are posture-only here (§7, §10) — commit numbers against the chosen vendor (U14) at first deploy.
-- Carried: U7/U10/U12/U16/U17/U18/U20 (first implementation / re-measure), U11 (art pass), U13/U23 (M10).
-
----
-
-## 13. Changelog
-
-- **2026-07-21 (Session 10, M9):** initial acceptance. D22 (topology + cross-origin isolation + environments/migrations), D23 (CI/CD determinism+perf matrix + observability + data-lifecycle/moderation ops). `types/infra.ts` added. No changes to the scene format, engine constants, API (`openapi.yaml`), or DB schema (`schema.sql`) — M9 deploys the existing surface; the only runtime additions are HTTP headers, CI pipelines, dashboards, and policy. U5/U15 resolved; U9 resolved-by-design (execution is CI-time); U14/U22/U19/U21/U24/U25 narrowed; U26 opened.
 ```
+runMigrations(doc, registry, target):
+  cur ← doc.schemaVersion                 # numeric, or E_MIGRATION
+  if cur > target: reject                  # forward-only: a v5 doc on a v1 app is refused, not guessed
+  while cur < target:
+    step ← registry.find(from = cur)       # or E_MIGRATION "no migration from N"
+    assert step.to == step.from + 1        # gap-free: single-step only
+    doc ← step.migrate(doc); doc.schemaVersion ← step.to; cur ← step.to
+  validate(doc) against scene.schema.json  # fail ⇒ E_MIGRATION
+```
+
+Its guarantees, each executed as a fixture in the spike:
+
+- **E1 — identity at current version.** At `schemaVersion` 1 the registry is empty (`SCENE_MIGRATIONS = []`); a current doc passes through untouched and re-validates. This is the live case today.
+- **E2 — forward migration re-validates.** A synthetic v0→v1 migration takes a legacy doc to current and it passes the *full* strict schema — the migration's job is to produce a document indistinguishable from a natively-current one.
+- **E3 — gap-free.** A registry with a `0→2` step is rejected by the single-step guard, never silently skipping v1.
+- **E4 — forward-only.** A document newer than the app (v5 on a v1 client) is rejected with a clear error, never partially loaded.
+
+The runner runs in **two places** with the same code (the `scene-format` package, per 00-PROGRESS §5): client-side at load (05 key flow "migrate old versions forward"), and as an **offline backfill job** that rewrites stored documents after a `schemaVersion` bump so the read path never migrates on the fly. Because migration output re-validates against the strict schema, a migration that produces an invalid document fails CI (a golden corpus of every historical version is migrated forward and validated) — not production.
+
+---
+
+## 6. CI/CD (D23) — and the U9 resolution
+
+Two gating workflows plus a deploy pipeline. A release is blocked until both gates are green (`DEPLOY.gatedByCi`).
+
+### 6.1 `ci.yml` — the everyday gate (fast)
+
+Runs on every push/PR: `tsc --strict --exactOptionalPropertyTypes --noUncheckedIndexedAccess` over `types/*.ts`, plus the three verify suites these sessions built as first-class CI jobs — `verify.mjs` (ajv scene corpus), `verify-backend.mjs` (OpenAPI 3.1 + the real PG grammar via pgsql-parser + three-way error-code equality), and the new `verify-infra.mjs` — and unit tests across Node `CI_NODE_VERSIONS` (20, 22). The verify suites are the accumulated "verified, not just written" bar turned into a merge gate.
+
+### 6.2 `determinism-matrix.yml` — the U9 resolution
+
+Determinism is a *cross-platform* promise (01 §3.4). Every session's spike proved it on **one** machine (S3/S6/S8/S9, all darwin-arm64); U9 is the standing question of whether it holds across ISAs and browsers. This workflow is the answer:
+
+| Job | Fans out over | Proves |
+|---|---|---|
+| `node-golden` | `DETERMINISM_RUNNERS` = **ubuntu-latest (x86-64) × macos-14 (arm64)** × Node 20/22 | The environment-free SimCore (03 §1) produces **byte-identical state hashes** across ISAs. This is the cross-ISA property S8's E1 (cross-*process*) could not reach on one machine. |
+| `browser-golden` | `BROWSER_TRIPLE` = **chromium × firefox × webkit** (Playwright) | The same golden scenes hash identically in-browser, and equal to the Node golden — the WASM build + SAB transport agree across engines. Carries the 09 §9 render/perf gate (per-tier frame p95, draw-call ceiling vs committed `PERF_VERSION` baselines). |
+
+Both matrices are **three-way pinned**: the OS/browser/node sets in the YAML are cross-checked against `types/infra.ts` (`DETERMINISM_RUNNERS`, `BROWSER_TRIPLE`, `CI_NODE_VERSIONS`) by `verify-infra.mjs` §B, and both ISAs are additionally a *compile* proof in `infra.ts` (`_U9Linux`/`_U9MacArm`) — dropping either the linux or the arm64 runner fails the TypeScript build naming U9. So U9 cannot be silently weakened by editing a matrix.
+
+Golden hashes are keyed by `CI.GOLDEN_KEY_VERSIONS` (engine build + verifier + ranking + prompt + perf versions). A mismatch **not** explained by one of those changing is an *engine incident* opened against us (08 §5.6) — never an accusation against a contributor. A nightly `schedule` re-runs the browser triple against driver drift even when nothing changed.
+
+### 6.3 `deploy.yml`
+
+Triggered by successful `ci` **and** `determinism-matrix` on `main`. Staging deploys automatically (run migrations → rolling API update → smoke test: `/healthz` readiness + one save→publish→verify round-trip); prod follows after staging is healthy, same runner, `rolling` strategy behind the load balancer, migrations first inside a transaction. The same image promotes across environments; only env vars and secrets differ.
+
+---
+
+## 7. Observability (D24)
+
+Standard three pillars (structured JSON logs with a request id, RED metrics per route, distributed traces on the write path) plus **three domain signals** this platform specifically needs, wired to alerts:
+
+| Signal | Source (`OBSERVABILITY`) | Alerts when |
+|---|---|---|
+| **Determinism divergence (U9 in production)** | `idx_run_reports_divergence` on `run_reports` (08 §5.6) — client-vs-server hash disagreement, keyed by `engine_version` | Divergence rate for an `engineVersion` rises above baseline → engine incident. Anonymous players feed this (IP-bucketed) because divergence from machines we don't own is exactly the data CI can't produce. This is the continuous half of the U9 answer; §6.2 is the pre-merge half. |
+| **Verification queue** | depth over `scene_verifications`; capacity budgets `VERIFY_WALL_BUDGET_MS` / `WORKER_CONCURRENCY` / `BODY_BUDGET` echoed from `VERIFY` so the alarm can't drift from 08 §5.5 | Backlog freshness exceeds `SLO.VERIFY_FRESHNESS_MIN` (15 min) → scale the worker. |
+| **Trending job health & shadow-tuning (U19/U21)** | the ranking job writes live scores to the Redis zset and *also* a candidate ordering to a shadow zset (`TRENDING_SHADOW_SUFFIX`) under a trial `RANKING_VERSION` | The live/shadow orderings are diffed **offline** against real traffic; a parameter change is promoted by bumping `RANKING_VERSION` only after review. Live order is never touched by an experiment. |
+
+**SLOs** (`SLO`): read availability 99.9 %, write 99.5 % (argon2/OAuth make writes heavier), p95 scene-GET 200 ms (cache-fronted), p95 explore 300 ms. Verification is a queue, so its SLO is freshness (15 min), not latency. The 09 §9 per-tier perf regression gate is the *build-time* SLO for the client; `PERF_GATE` sets the thresholds (frame p95 ≤ tier budget × 1.1, throughput regression ≤ 1.15×) and runs on every tier (`CI_PERF_TIERS`, exhaustive over `TierId`).
+
+---
+
+## 8. Operational data flows
+
+### 8.1 Account deletion, export & erasure (U15)
+
+No schema change — the mechanism is the `deleted_at` soft-delete columns already in `schema.sql` (`users`, `scenes`, `comments`) plus the existing purge job:
+
+- **Export** (right to portability): a job bundles the user's scenes (documents at head revision), profile, and social edges into a downloadable archive in object storage, link emailed, TTL-expired. Read-only over existing tables; no new endpoint semantics beyond a request + a signed download.
+- **Erasure** (right to deletion): `users.deleted_at` is set (immediate logout, handle released after cooldown), then the purge job hard-deletes personal data. The **remix-lineage policy** (sketched in 05 §12, decided here): the user's *scenes* are purged, but a scene that others **remixed** survives as an `unavailable` lineage node (08's placeholder that never leaks what it hid) — the derivative works of other users are not destroyed by an upstream author's deletion, and `remixed_from` pointers into a purged scene are nulled, not cascaded. This is the one place "erase my data" and "don't destroy other people's work" conflict, and the tie goes to preserving the derivatives while removing the personal data and attribution.
+
+### 8.2 Moderator operations (U22)
+
+The **data model** is already in place (08 D19: `content_reports`, `moderation_state`, the effects matrix, 404-not-403, appeal retention). M9 adds the **operational half**: a moderator queue UI over `content_reports`, actions that only ever *limit* reach (never expand it), and an append-only audit log of every moderation action (who, what, when, prior state) for the 30-day appeal window. The human policy (who moderates, SLA, appeal handling) is an operations decision, not a code decision, and is owned by whoever runs the deployment; the system enforces only that actions are logged, reversible within the window, and reach-limiting.
+
+### 8.3 Backup & DR
+
+Postgres is the only source of truth that isn't reconstructible (Redis is a cache + rebuildable zsets; object storage is content-addressed + re-derivable thumbnails). Point-in-time recovery (WAL archiving) with a tested restore runbook; object storage cross-region replication; RPO ≤ 5 min, RTO ≤ 1 h as the MVP target. Because scene documents are immutable and content-addressed, a restore can never corrupt a published run's identity — the hash either resolves or it doesn't.
+
+---
+
+## 9. Security & compliance posture
+
+Consolidates the choices already made, made concrete for deployment: TLS everywhere; HSTS; the `__Host-` session cookie (D12) pinned to the API origin; Origin-check CSRF (D12); argon2id login cost sized against its rate buckets (05 §8); the COOP/COEP pair (§3); a strict CSP on the app (scenes are data, never code — 01 §6, no user scripts in MVP); dependency lockfile committed with the `ENGINE_BUILD` exact-pin so the determinism supply chain can't shift silently; secrets server-only with rotation windows (§4). The AI proxy's injection blast radius stays bounded per 07 §7 (no tools, findings-only client input, full gate on output) — nothing in M9 widens it.
+
+---
+
+## 10. Decisions & open issues
+
+**Decisions recorded this session:**
+
+- **D22 — Topology & vendor posture.** Cloud-agnostic 12-factor: stateless Fastify pods + one jobs/verification worker + managed Postgres/Redis + object storage/CDN; the same image promotes across `dev`/`staging`/`prod`; every stateful dependency behind a driver so the vendor pick (U14) is a deploy choice, not architecture. CDN edge-caches immutable content-addressed docs forever (D21 read-path). §2, §4.
+- **D23 — CI/CD & the U9 determinism gate.** Two gating workflows (`ci` fast; `determinism-matrix` cross-ISA + browser-triple golden hashes) plus a gated `deploy`; goldens keyed by the engine/verifier/ranking/prompt/perf versions; the U9 matrix is three-way-pinned (YAML ↔ `infra.ts` ↔ a compile proof). Migrations run before traffic, expand-then-contract. §5, §6.
+- **D24 — Observability & shadow-tuning.** Three domain signals (determinism divergence = production U9, verification-queue freshness, trending live/shadow diffing = U19/U21) on top of the standard three pillars; SLOs + the 09 §9 per-tier build-time perf gate. §7.
+- **D25 — Account lifecycle & moderator ops.** Export + erasure over existing soft-delete columns (no DDL); the remix-lineage tie resolved (purge the author's scenes, preserve others' derivatives as `unavailable` nodes, null the pointers) — closes U15; moderator queue + append-only audit log over the M7 data model, reach-limiting only — closes U22 (data), leaves human policy to operations. §8.
+
+**Unresolved issues (status after S10):**
+
+- **U9 → resolved by construction, monitored continuously.** `determinism-matrix.yml` proves cross-ISA + cross-browser hash identity pre-merge (§6.2) and `idx_run_reports_divergence` monitors it in production (§7). The first real cross-platform golden run happens when the `engine` package lands (the workflow steps are stubbed to that package today); until then the *gate shape* is proven (matrix wiring, three-way pin, key versions) but not the hashes themselves — tracked as the one remaining first-implementation confirmation.
+- **U5 → resolved.** COOP/COEP `credentialless` for first-party isolation; embeds use the identical-result µs-scale fallback; the predicate + fallback selection are executable-proven (§3). Embed *reach* is now a non-issue, not a compromise.
+- **U14 → narrowed to a deploy-time pick.** The architecture is vendor-neutral behind drivers; object storage/CDN and transactional-email deliverability remain the two picks with lock-in, isolated to their driver → chosen at first implementation.
+- **U15 → resolved (policy + mechanism);** operational runbook (support flow, verification of requester identity) → operations.
+- **U19/U21 → mechanism resolved (shadow zset + `RANKING_VERSION` promotion);** the actual parameter values still need real traffic → post-launch tuning.
+- **U22 → data model + enforcement invariants resolved;** human moderation policy → operations.
+- **U25 (M8) → partly addressed:** the 09 §9 harness now has a home (`determinism-matrix.yml` browser triple + per-tier perf gate); real per-tier hardware baselines still land at first implementation.
+- **U26 (new):** the CI golden hashes are proven *in shape* only — the SimCore/render/perf steps are stubbed to packages that don't exist yet (00-PROGRESS §5). First implementation must wire them and commit the first real cross-platform baseline; only then is U9 empirically (not just structurally) closed.
+- U7/U10/U12/U16/U17/U18/U20 (first implementation / re-measure), U11 (first-implementation art), U13/U23 (M10) unchanged.
+
+**This is the final design milestone.** M10 (multiplayer roadmap & monetization) and M11 (consolidated MVP→production roadmap) are planning documents; implementation begins after M11 against the layout in 00-PROGRESS §5, and every artifact these ten sessions produced — the schema, the OpenAPI surface, the typed constants, and the four verify suites now wired as CI gates — is the executable contract it starts from.
+
+---
+
+## 11. Spike record (2026-07-21)
+
+Verified, not just written — `verify-infra.mjs` run in the scratchpad (`npm i ajv yaml`), all checks green, every check confirmed to bite:
+
+- **A** — all three workflow YAMLs parse and are structurally valid (name + `on` + jobs, each job with `runs-on` + steps).
+- **B** — the U9 matrix is consistent three ways: `infra.ts` `DETERMINISM_RUNNERS`/`BROWSER_TRIPLE`/`CI_NODE_VERSIONS` == the `determinism-matrix.yml` job matrices, with both ISAs present.
+- **C/D** — every workflow path named in `infra.ts` exists; every `OBSERVABILITY` name (`idx_run_reports_divergence`, `run_reports`, `scene_verifications`) resolves to a real object in `schema.sql`.
+- **E** — the migration runner executes its four contract fixtures (identity-at-current, forward-migrate-and-revalidate, gap rejection, future-version rejection) against the real `scene.schema.json`.
+- **F** — the cross-origin-isolation predicate returns the correct grant/deny for the credentialless pair, the require-corp pair, a missing-COEP embed, and an unsafe-none COOP.
+- **Negative tests (5 runtime + 2 compile) all bit naming the offender:** dropping `macos-14` from `infra.ts` (compile: `U9: macos-arm64 determinism runner missing`) and from the YAML matrix (`node-golden.matrix.os ≠ DETERMINISM_RUNNERS`); dropping `webkit` (compile: `BROWSER_TRIPLE misses: "webkit"`; runtime: matrix ≠ triple); renaming the divergence index out of `schema.sql`; and emptying a job's steps.
+- `tsc --strict --exactOptionalPropertyTypes --noUncheckedIndexedAccess` passes on all **ten** type files including `types/infra.ts`. No change to `openapi.yaml`, `schema.sql`, or `scene.schema.json`, so `verify-backend.mjs` is untouched (nothing new to check on that surface).
