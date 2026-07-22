@@ -8,7 +8,7 @@
  * change; every constant that matters is tied by compile proof to the constant it
  * must not drift from.
  *
- * The load-bearing proof (D25): the FREE plan equals the shipped MVP entitlements,
+ * The load-bearing proof (D27): the FREE plan equals the shipped MVP entitlements,
  * and the format/engine caps are IDENTICAL on every plan. Monetization is therefore
  * strictly additive — you cannot build a paid tier by nerfing free, and you cannot
  * sell past the determinism/format invariants (object cap, body cap). Change the
@@ -68,7 +68,7 @@ export const COLLAB = {
 } as const;
 
 // ===========================================================================
-// § Plans & entitlements (11 §6, D25)
+// § Plans & entitlements (11 §6, D27)
 // ===========================================================================
 
 export type PlanId = 'free' | 'plus' | 'pro';
