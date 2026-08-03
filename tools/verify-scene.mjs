@@ -1,14 +1,15 @@
 // M1 verification: schema compiles, doc examples validate, negatives fail.
-import { readFileSync } from 'node:fs';
+// Run from anywhere: `pnpm verify:scene` (paths are repo-root anchored, P0).
+import { readRepo, readRepoJson } from './repo.mjs';
 import Ajv2020 from 'ajv/dist/2020.js';
 
-const schema = JSON.parse(readFileSync('./scene.schema.json', 'utf8'));
+const schema = readRepoJson('scene.schema.json');
 const ajv = new Ajv2020.default({ strict: true, allErrors: true });
 const validate = ajv.compile(schema);
 console.log('schema compiled OK (ajv strict mode)');
 
 // --- extract JSON blocks from the spec doc; full scenes have schemaVersion ---
-const md = readFileSync('./02-SCENE-FORMAT.md', 'utf8');
+const md = readRepo('docs/02-SCENE-FORMAT.md');
 const blocks = [...md.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => m[1]);
 let fullScenes = 0;
 for (const [i, b] of blocks.entries()) {

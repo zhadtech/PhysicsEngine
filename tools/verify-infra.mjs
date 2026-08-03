@@ -1,12 +1,11 @@
-// M9 verification (companion to verify.mjs / verify-backend.mjs, same
-// copy-to-scratch convention: `npm i ajv yaml` in a dir holding this file plus
-// .github/workflows/*.yml, schema.sql, scene.schema.json, and types/infra.ts).
+// M9 verification (companion to verify-scene.mjs / verify-backend.mjs).
+// Run from anywhere: `pnpm verify:infra` (repo-root anchored since P0).
 //
 // It checks the things tsc cannot see — the CI workflow YAML, the SQL, and the
 // runtime behaviour of the two algorithms M9 introduces (the schema-migration
 // runner and the cross-origin-isolation predicate) — and cross-checks the U9
 // determinism matrix three ways: types/infra.ts ↔ the determinism workflow YAML.
-import { readFileSync } from 'node:fs';
+import { readRepo, readRepoJson } from './repo.mjs';
 import { parse as parseYaml } from 'yaml';
 import Ajv2020 from 'ajv/dist/2020.js';
 
@@ -33,7 +32,7 @@ const parsed = {};
 for (const [key, path] of Object.entries(WORKFLOWS)) {
   let wf;
   try {
-    wf = parseYaml(readFileSync(path, 'utf8'));
+    wf = parseYaml(readRepo(path));
   } catch (e) {
     fail(`${path}: not valid YAML (${e.message})`);
     continue;
@@ -58,7 +57,7 @@ for (const [key, path] of Object.entries(WORKFLOWS)) {
 // ---------------------------------------------------------------------------
 section('B. U9 determinism matrix — three-way (infra.ts ↔ determinism YAML)');
 // ---------------------------------------------------------------------------
-const infraSrc = readFileSync('./types/infra.ts', 'utf8');
+const infraSrc = readRepo('types/infra.ts');
 // Extract a string-literal array declared as `NAME = [ ... ]` from infra.ts.
 const arrLit = (name) => {
   const m = infraSrc.match(new RegExp(`${name}\\s*=\\s*\\[([^\\]]*)\\]`));
@@ -110,7 +109,7 @@ for (const [constName, path] of [
 // ---------------------------------------------------------------------------
 section('D. Observability names resolve to real DB objects (schema.sql)');
 // ---------------------------------------------------------------------------
-const sql = readFileSync('./schema.sql', 'utf8');
+const sql = readRepo('schema.sql');
 for (const name of ['idx_run_reports_divergence', 'run_reports', 'scene_verifications']) {
   if (sql.includes(name)) ok(`OBSERVABILITY → '${name}' exists in schema.sql`);
   else fail(`OBSERVABILITY names '${name}' but it is absent from schema.sql`);
@@ -137,7 +136,7 @@ function runMigrations(doc, registry, target) {
   return out;
 }
 
-const schema = JSON.parse(readFileSync('./scene.schema.json', 'utf8'));
+const schema = readRepoJson('scene.schema.json');
 const ajv = new Ajv2020.default({ strict: true, allErrors: true });
 const validateScene = ajv.compile(schema);
 const CURRENT = 1; // === MIGRATION.currentSchemaVersion / SCHEMA_VERSION

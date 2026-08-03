@@ -1,1 +1,16 @@
 .DS_Store
+
+# Workspace (P0)
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+
+# 10 §4 — configuration is env vars only; no secret value is ever committed.
+.env
+.env.*
+!.env.example
+
+# Playwright / determinism-matrix artefacts (P2+)
+test-results/
+playwright-report/

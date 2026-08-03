@@ -8,10 +8,10 @@
 // the *real* source documents — a roadmap that silently drops a U-issue, a
 // brief item, or reorders a phase below its dependency fails the build.
 //
-// Zero dependencies. Copy 12-ROADMAP.md, project_idea.md, and 00-PROGRESS.md
-// into the cwd (the verify*.mjs convention) and run `node verify-roadmap.mjs`.
+// Zero dependencies. Run from anywhere: `pnpm verify:roadmap` (repo-root
+// anchored since P0; its three source documents live in docs/).
 
-import { readFileSync } from 'node:fs';
+import { readRepo } from './repo.mjs';
 
 const eqSet = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
 const setStr = (s) => `{${[...s].sort((x, y) => x - y).join(',')}}`;
@@ -45,10 +45,7 @@ function rowIntegers(text) {
 }
 const allUNumbers = (t) => new Set([...t.matchAll(/\bU(\d+)\b/g)].map((m) => Number(m[1])));
 
-function load(name) {
-  try { return readFileSync(name, 'utf8'); }
-  catch { console.error(`missing ${name} — copy it into the cwd first`); process.exit(2); }
-}
+const load = (name) => readRepo(`docs/${name}`);
 
 // All checks live here so the negative battery can re-run them on mutated input.
 // Returns the number of failed assertions; `log` gates output.

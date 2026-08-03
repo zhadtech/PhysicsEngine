@@ -1,0 +1,6 @@
+# Workspace layout — 00-PROGRESS §"planned repo layout" / 12-ROADMAP §3 (P0).
+# Every package/app named in the roadmap phase table lives under one of these
+# globs; tools/verify-workspace.mjs asserts that correspondence both ways.
+packages:
+  - 'packages/*'
+  - 'apps/*'

@@ -2,10 +2,8 @@
  * Compile-time cross-check: the spec's example scenes must typecheck as `Scene`,
  * and the discriminated unions must narrow correctly. Not shipped; dev-only.
  */
+import type { Scene, SceneObject, Link } from './scene';
 import {
-  Scene,
-  SceneObject,
-  Link,
   MATERIAL_DEFAULTS,
   NAMED_ANCHORS,
   isObjectType,

@@ -1,0 +1,15 @@
+{
+  "name": "@physics/procgen",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Seeded procedural machine generation: the stage grammar, serpentine layout CSP, and the verify-by-simulation self-check (gates G1–G6) that reuses the headless SimCore.",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "physics": {
+    "phase": "P5",
+    "contract": "docs/06-PROCGEN.md"
+  }
+}

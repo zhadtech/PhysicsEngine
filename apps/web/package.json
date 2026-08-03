@@ -1,0 +1,15 @@
+{
+  "name": "@physics/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "React builder (place/move/rotate/link, snap, anchors), Three.js InstancedMesh renderer, play-mode UI over the 03 §5 worker protocol, analytics panel, IndexedDB local drafts.",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "physics": {
+    "phase": "P3",
+    "contract": "docs/04-BUILDER-UX.md"
+  }
+}

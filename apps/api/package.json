@@ -1,0 +1,15 @@
+{
+  "name": "@physics/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fastify over PostgreSQL: scenes CRUD + the revision/publish FSM, auth (DB sessions, argon2id, PKCE OAuth), remix lineage, thumbnails, and later the AI proxy, community surface and verification queue.",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "physics": {
+    "phase": "P4",
+    "contract": "docs/05-BACKEND.md"
+  }
+}
