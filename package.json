@@ -1,0 +1,33 @@
+{
+  "name": "physics-sandbox",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Physics Sandbox Platform — deterministic 2.5D machine builder (design docs in docs/, build plan in docs/12-ROADMAP.md)",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "pnpm run typecheck:design && turbo run typecheck",
+    "typecheck:design": "tsc -p tsconfig.json",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "verify": "pnpm run verify:workspace && pnpm run verify:scene && pnpm run verify:backend && pnpm run verify:infra && pnpm run verify:roadmap",
+    "verify:workspace": "node tools/verify-workspace.mjs",
+    "verify:scene": "node tools/verify-scene.mjs",
+    "verify:backend": "node tools/verify-backend.mjs",
+    "verify:infra": "node tools/verify-infra.mjs",
+    "verify:roadmap": "node tools/verify-roadmap.mjs",
+    "ci": "pnpm run typecheck && pnpm run verify && pnpm run test"
+  },
+  "devDependencies": {
+    "@seriousme/openapi-schema-validator": "2.9.0",
+    "ajv": "8.20.0",
+    "pgsql-parser": "16.1.1",
+    "turbo": "2.10.8",
+    "typescript": "5.9.3",
+    "yaml": "2.9.0"
+  }
+}

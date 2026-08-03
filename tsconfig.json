@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "_comment": [
+    "The design-phase type surface (M1–M10). These eleven files are the",
+    "compile-tied companions to the specs in docs/; they migrate into their",
+    "owning packages as each phase lands (types/scene.ts → packages/scene-format",
+    "at P1, types/protocol.ts → packages/engine at P2, and so on).",
+    "This is the config the ci.yml `typecheck` job runs."
+  ],
+  "extends": "./tsconfig.base.json",
+  "include": ["types/**/*.ts"]
+}

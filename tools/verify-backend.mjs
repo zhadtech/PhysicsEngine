@@ -1,12 +1,8 @@
 // M4+M6+M7 verification (05-BACKEND.md §10, 07-AI-PIPELINE.md §10,
 // 08-COMMUNITY.md §10): OpenAPI validity, real-PG-grammar DDL, and
-// cross-artifact consistency. Run like verify.mjs: copy these files into a
-// scratch dir — openapi.yaml, schema.sql, scene.schema.json, 05-BACKEND.md,
-// 08-COMMUNITY.md, and (flattened from types/) api.ts, scene.ts, ai.ts,
-// community.ts, protocol.ts — then:
-//   npm i ajv yaml @seriousme/openapi-schema-validator pgsql-parser
-//   node verify-backend.mjs
-import { readFileSync } from 'node:fs';
+// cross-artifact consistency. Run from anywhere: `pnpm verify:backend`
+// (repo-root anchored since P0 — no more flattening types/ into a scratch dir).
+import { readRepo, readRepoJson } from './repo.mjs';
 import { parse as parseYaml } from 'yaml';
 import { Validator } from '@seriousme/openapi-schema-validator';
 import { parse as parsePgSql } from 'pgsql-parser';
@@ -21,16 +17,16 @@ const ok = (msg) => console.log(`ok: ${msg}`);
 const setEq = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
 const diff = (a, b) => [...a].filter((x) => !b.has(x));
 
-const yamlText = readFileSync('./openapi.yaml', 'utf8');
-const sql = readFileSync('./schema.sql', 'utf8');
-const apiTs = readFileSync('./api.ts', 'utf8');
-const sceneTs = readFileSync('./scene.ts', 'utf8');
-const aiTs = readFileSync('./ai.ts', 'utf8');
-const communityTs = readFileSync('./community.ts', 'utf8');
-const protocolTs = readFileSync('./protocol.ts', 'utf8');
-const doc05 = readFileSync('./05-BACKEND.md', 'utf8');
-const doc08 = readFileSync('./08-COMMUNITY.md', 'utf8');
-const sceneSchema = JSON.parse(readFileSync('./scene.schema.json', 'utf8'));
+const yamlText = readRepo('openapi.yaml');
+const sql = readRepo('schema.sql');
+const apiTs = readRepo('types/api.ts');
+const sceneTs = readRepo('types/scene.ts');
+const aiTs = readRepo('types/ai.ts');
+const communityTs = readRepo('types/community.ts');
+const protocolTs = readRepo('types/protocol.ts');
+const doc05 = readRepo('docs/05-BACKEND.md');
+const doc08 = readRepo('docs/08-COMMUNITY.md');
+const sceneSchema = readRepoJson('scene.schema.json');
 
 // --- 1. OpenAPI 3.1 meta-schema validity -----------------------------------
 const spec = parseYaml(yamlText);

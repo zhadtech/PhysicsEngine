@@ -1,0 +1,15 @@
+{
+  "name": "@physics/scene-format",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Scene document schema, TypeScript types, validation gate and schemaVersion migrations — the one definition of a valid scene, imported by client and server alike.",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "physics": {
+    "phase": "P1",
+    "contract": "docs/02-SCENE-FORMAT.md"
+  }
+}

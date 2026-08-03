@@ -139,6 +139,8 @@ Two gating workflows plus a deploy pipeline. A release is blocked until both gat
 
 Runs on every push/PR: `tsc --strict --exactOptionalPropertyTypes --noUncheckedIndexedAccess` over `types/*.ts`, plus the three verify suites these sessions built as first-class CI jobs — `verify.mjs` (ajv scene corpus), `verify-backend.mjs` (OpenAPI 3.1 + the real PG grammar via pgsql-parser + three-way error-code equality), and the new `verify-infra.mjs` — and unit tests across Node `CI_NODE_VERSIONS` (20, 22). The verify suites are the accumulated "verified, not just written" bar turned into a merge gate.
 
+> **Implementation note (P0, Session 13 — D29).** The suites now live in `tools/` and run as one matrixed `verify` job over five of them: the three above (`verify.mjs` renamed `verify-scene.mjs`), plus `verify-roadmap.mjs` (authored in M11, never wired) and `verify-workspace.mjs` (the P0 skeleton check). Compiler options moved from bare `tsc` flags into `tsconfig.base.json`, since the flag-only form defaulted to `target: ES5` and could not have passed. The *gate* is unchanged — same merge criterion, same suites, now executable on a fresh clone via `pnpm run ci`.
+
 ### 6.2 `determinism-matrix.yml` — the U9 resolution
 
 Determinism is a *cross-platform* promise (01 §3.4). Every session's spike proved it on **one** machine (S3/S6/S8/S9, all darwin-arm64); U9 is the standing question of whether it holds across ISAs and browsers. This workflow is the answer:

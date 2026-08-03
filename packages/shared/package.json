@@ -1,0 +1,15 @@
+{
+  "name": "@physics/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cross-cutting utilities shared by the packages and apps. Owns no user-facing surface and is not a roadmap phase of its own — it accretes across P0–P8 as common code is factored out.",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "physics": {
+    "phase": "P0",
+    "contract": "docs/01-ARCHITECTURE.md"
+  }
+}

@@ -1,10 +1,19 @@
-# Everyday gate (10 §6). Runs on every push/PR: typecheck, the schema/backend
-# verify suites that these spec sessions built, and unit tests. The heavy
-# cross-platform determinism + browser matrix lives in determinism-matrix.yml so
-# this stays fast; a release is gated on both (types/infra.ts DEPLOY.gatedByCi).
+# Everyday gate (10 §6.1). Runs on every push/PR: typecheck, the verify suites
+# these sessions built, and unit tests. The heavy cross-platform determinism +
+# browser matrix lives in determinism-matrix.yml so this stays fast; a release
+# is gated on both (types/infra.ts DEPLOY.gatedByCi).
 #
-# Paths target the planned monorepo layout (00-PROGRESS §5); until packages exist
-# the verify-* jobs run against the repo-root spec artifacts they already check.
+# P0 made this real. Before the monorepo existed the jobs here were written
+# against a layout that did not exist yet, and two of them could not have
+# passed on a fresh clone:
+#   * `verify-backend` ran `node verify-backend.mjs` at the repo root, but the
+#     script read `./api.ts` — it only ever ran in a scratch dir with types/
+#     flattened into it. Paths are repo-root anchored now (tools/repo.mjs).
+#   * `typecheck` ran bare `tsc --strict` with no target, so it defaulted to
+#     ES5/lib.es5 and failed on Array.includes and SharedArrayBuffer. Compiler
+#     options now come from tsconfig.base.json.
+# Everything below therefore runs the same commands a developer runs locally
+# (`pnpm run ci`), which is the only way this gate stays honest.
 name: ci
 
 on:
@@ -21,56 +30,52 @@ permissions:
   contents: read
 
 jobs:
+  # Strict tsc over the design-phase type surface (types/*.ts) and every
+  # workspace package, via turbo.
   typecheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      # Strict tsc with the flags every session verifies under (physics-sandbox-session-workflow).
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - name: tsc (strict)
-        run: npx -p typescript tsc --strict --exactOptionalPropertyTypes --noUncheckedIndexedAccess --noEmit types/*.ts
+        run: pnpm run typecheck
 
-  verify-scene:
+  # The accumulated "verified, not just written" bar, turned into a merge gate.
+  # One job per suite so a failure names itself in the checks list.
+  verify:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          # monorepo skeleton ↔ canonical layout ↔ 12-ROADMAP §3 ↔ SECRETS (P0)
+          - workspace
+          # ajv-strict scene-format corpus (schema, doc examples, 15 negatives)
+          - scene
+          # OpenAPI 3.1 + real PG grammar (pgsql-parser) + three-way error codes
+          - backend
+          # workflow structure, U9 matrix ↔ types/infra.ts, migrations, isolation
+          - infra
+          # U-issue/deliverable coverage + phase order is a valid topo sort
+          - roadmap
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      # ajv-strict scene-format corpus (verify.mjs reads scene.schema.json + 02 examples).
-      - name: scene-format verify
-        run: |
-          npm i --no-save ajv
-          node verify.mjs
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: verify ${{ matrix.suite }}
+        run: pnpm run verify:${{ matrix.suite }}
 
-  verify-backend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      # OpenAPI 3.1 + real PG grammar (pgsql-parser) + three-way error-code equality.
-      - name: backend verify
-        run: |
-          npm i --no-save ajv yaml @seriousme/openapi-schema-validator pgsql-parser
-          node verify-backend.mjs
-
-  verify-infra:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      # CI-workflow structure, U9 matrix ↔ types/infra.ts, migration runner, isolation headers.
-      - name: infra verify
-        run: |
-          npm i --no-save ajv yaml
-          node verify-infra.mjs
-
+  # Package unit tests across CI_NODE_VERSIONS (types/infra.ts). A no-op while
+  # the packages are P0 skeletons; it becomes real at P1 with scene-format.
   unit:
     runs-on: ubuntu-latest
     strategy:
@@ -78,8 +83,11 @@ jobs:
         node: ['20', '22']
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - name: unit tests
-        run: echo "packages/*/test — wired when implementation lands (00-PROGRESS §5)"
+        run: pnpm run test

@@ -4,17 +4,17 @@
 > Working title: *Physics Sandbox Platform* (placeholder — naming is a later decision).
 
 - **Repository role of this file:** progress tracker + decision index
-- **Last updated:** 2026-07-22 (Session 12)
-- **Current milestone:** M11 ✅ done → **the design phase is complete (M0–M11).** No milestone remains; implementation begins at P0 of `12-ROADMAP.md`.
+- **Last updated:** 2026-08-03 (Session 13)
+- **Current phase:** design complete (M0–M11 ✅) → **implementation.** **P0 ✅ done** (repo bring-up); next is **P1 — `packages/scene-format`** (`12-ROADMAP.md` §3).
 
 ---
 
 ## 1. How to resume a session
 
-1. Provide all project docs (this file, `01-ARCHITECTURE.md`, all `ADR-*.md`, and any milestone docs) to the session.
-2. Say "Continue the project."
-3. The assistant reads this file, picks the first milestone not marked ✅, and works only on it.
-4. At session end: this file gets updated (milestone status + session log) and all new/changed docs are delivered back.
+1. Say "Continue the project."
+2. The assistant reads this file (now at `docs/00-PROGRESS.md`), picks the **first phase in §3b not marked ✅**, and works only on it. The design milestones in §3 are all done; §3b is the live queue.
+3. Every phase's definition of done is an **existing** CI gate (`12-ROADMAP.md` §5) — never a new criterion invented at implementation time. Run it before claiming a phase: `pnpm run ci`.
+4. At session end: this file gets updated (phase status + session log) and all new/changed files are left in the working tree for the user to commit.
 
 ---
 
@@ -50,6 +50,7 @@
 | D26 | **Multiplayer collaboration roadmap**: real-time co-editing is a **convergent CRDT** over the scene document (add-wins observed-remove map for objects/links + LWW registers for fields/world), synced by a **stateful collab service** — a deliberate, contained exception to 01 §1's stateless non-goal (separate service, single-node session ownership, checkpointed to the existing `scene_revisions` store; the 05 CRUD API unchanged). Merge is always followed by the existing 05 §5.3 validation gate + a deterministic, order-independent link-GC repair, so collaboration adds **no new correctness model** (spike-validated); play stays local + deterministic. **U13** (cross-device drafts) is the single-user degenerate case (phase 1) | `11-MULTIPLAYER-MONETIZATION.md` §2–§5, `types/monetization.ts` | ✅ Accepted (Session 11) |
 | D27 | **Monetization model**: three plans (free/plus/pro); the free tier is **pinned by construction to the shipped MVP entitlements** (compile-proven — never retroactively nerfed), paid tiers strictly additive; the format/engine caps (object cap, body cap) are **universal and unsellable** (determinism/format invariants); sellable levers are account-scoped quotas (scene count, AI/day, collaborator seats), cosmetics (additive skin packs — shipped 8 stay free), verification priority (changes the wait, never the result), public-API access via PATs (05 §6.6 → M11), and challenge authoring (U23, pro tier). Subscription primary; creator payout economy deferred (U29) | `11-MULTIPLAYER-MONETIZATION.md` §6, `types/monetization.ts` | ✅ Accepted (Session 11) |
 | D28 | **Roadmap & release sequencing**: the M0–M10 specs become an ordered build (P0–P8) along the 01 §5 package DAG, sequenced **determinism-first** — `scene-format` (P1, frozen substrate) → `engine` (P2, the keystone; its `determinism-matrix`-green-with-real-hashes exit empirically closes U9/U26 before any breadth) → local `web` (P3) → `api` (P4, = **MVP/Beta**) → `procgen` (P5) → `ai` (P6) → community+verification (P7) → prod hardening (P8, = 1.0). Release cuts Alpha/**Beta=MVP**/RC/1.0; the definition-of-done for every phase is an **existing** CI/verify gate (10 §5–6), never a new criterion. Post-MVP surfaces (collab, monetization, public API, creator economy) on an additive post-1.0 lane. Companion check: `verify-roadmap.mjs` (coverage: all 29 U-issues placed, 13 brief items traced, topo-valid). **Closes the design phase.** | `12-ROADMAP.md`, `verify-roadmap.mjs` | ✅ Accepted (Session 12) |
+| D29 | **Implementation repo conventions (P0)**: `pnpm` workspaces + Turborepo over the canonical layout (specs in `docs/`, suites in `tools/`, `packages/*` + `apps/*` skeletons that gain code only when their phase starts); the verify suites are **repo-root anchored** and run in place via `pnpm` scripts — the copy-into-a-scratch-dir convention is retired — so CI runs the *same* commands a developer runs (`pnpm run ci`); compiler options are centralised in `tsconfig.base.json` with an explicit `target`/`lib` instead of bare `tsc` flags; the DDL check parses under the **exact target PostgreSQL major** (`pgsql-parser` pinned to the PG16 grammar, matching `schema.sql`), so PG17+ syntax cannot pass a check the production server would reject; lockfile committed + exact pins per the 10 §4 supply-chain rule. Companion check: `verify-workspace.mjs`. Adds **no** phase exit criterion — P0's definition of done remains "`ci.yml` green" | `12-ROADMAP.md` §3 (P0), `tools/verify-workspace.mjs`, `README.md` | ✅ Accepted (Session 13) |
 
 ---
 
@@ -73,6 +74,26 @@ Mapping of the 13 deliverables in `project_idea.md` into ordered milestones.
 | M11 | **Final roadmap MVP → production** | Consolidated development roadmap + task breakdown | 13 | ✅ Done (S12) |
 
 **All milestones complete.** The design phase is closed; `12-ROADMAP.md` sequences implementation (P0–P8) from MVP to production.
+
+---
+
+## 3b. Implementation phases (the live queue)
+
+The build order from `12-ROADMAP.md` §3 — determinism-first along the package DAG. **Work the first phase not marked ✅.** Each phase's "done" is the gate named there, run locally with `pnpm run ci` (plus the heavier matrix from P2 on).
+
+| Phase | Delivers | Release cut | Status |
+|---|---|---|--------|
+| P0 | Repo bring-up: pnpm workspaces + Turborepo, the `packages/*`/`apps/*` skeleton, `docs/`, the verify suites wired into `ci.yml`, env plumbing | Alpha | ✅ Done (S13) |
+| P1 | `packages/scene-format` — schema, types, validation, migration runner | Alpha | ⬜ Next |
+| P2 | `packages/engine` — **the keystone**; exits on `determinism-matrix` green with *real* golden hashes (closes U9/U26 empirically) | Alpha | ⬜ |
+| P3 | `apps/web` — builder + renderer + play mode, purely local | Alpha | ⬜ |
+| P4 | `apps/api` — Fastify/Postgres CRUD, revisions/publish, auth; web gains save/share | **Beta = MVP** | ⬜ |
+| P5 | `packages/procgen` — stage grammar + verify-by-simulation | RC | ⬜ |
+| P6 | `packages/ai` + `/ai/*` routes — prompt pipeline, validation/repair loop | RC | ⬜ |
+| P7 | Community + the verification queue (server-recomputed leaderboards) | 1.0 | ⬜ |
+| P8 | Production hardening — gated deploy, migrations before traffic, SLOs, account lifecycle | 1.0 | ⬜ |
+
+Post-1.0 lane (additive, not in this queue): collaboration (**U28** spec first), monetization, public API (**U30** spec first), creator economy.
 
 Milestone order rationale: the scene format (M1) is depended on by everything else (simulation, builder, backend, procgen, AI), so it comes first after foundation. Backend (M4) comes after builder (M3) so the API serves real UI needs.
 
@@ -316,3 +337,21 @@ physics-sandbox/
 - **No design unknowns remain.** Every other U-issue carries its `12-ROADMAP.md` §6 disposition: resolved-in-design (U1–U6, U8, U9, U13, U15, U23), first-implementation at a named phase (U7, U10–U12, U14, U16–U18, U20, U24–U26), or post-launch/business (U19, U21, U22, U27–U29). All are owned by a phase with a re-measure trigger.
 
 **Project status: design phase complete (M0–M11).** All 13 brief deliverables are specified, machine-checked where checkable, and sequenced into an implementable build. There is no next milestone. Implementation starts at **P0** of `12-ROADMAP.md`; the first substantive engineering gate is **P2** (empirical determinism closure). The remaining normative-spec debts are explicitly post-1.0: **U28** (collab sync-service) and **U30** (public-API surface).
+
+### Session 13 — 2026-08-03
+
+**Completed — P0 (Repo bring-up) — implementation begins.** First session past the design phase. P0's deliverable is *structure*, and its definition of done was already written: `ci.yml` green on the monorepo, with the `packages/*` stubs the M9 workflows reference actually existing. No phase, gate, or exit criterion in `12-ROADMAP.md` changed.
+
+- **The monorepo exists.** `pnpm` workspaces + Turborepo over the canonical layout: `packages/{scene-format,engine,procgen,ai,shared}` + `apps/{web,api}`, each with a manifest that declares its **roadmap phase** and the **contract spec** it implements, a tsconfig extending the shared base, a README naming both, and a `src/index.ts` stub. Skeletons are deliberately empty — a package gains code only when its phase starts. The eleven specs moved to `docs/` (ADRs to `docs/adr/`), the verify suites to `tools/`, and the root `README.md` (previously a 0-byte file) became the entry point.
+- **The gate runs for real, and executing it found two latent defects.** Both workflows were written in design against a repo that did not exist yet, and neither job could have passed on a fresh clone:
+  1. `verify-backend` ran `node verify-backend.mjs` at the repo root, but the script read `./api.ts` — it only ever worked in a scratch directory with `types/` flattened into it. **Fix:** `tools/repo.mjs` anchors every suite at the repo root, so they read `types/api.ts` and `docs/05-BACKEND.md` in place and run identically from any cwd. The copy-into-a-scratch-dir convention that every design session used is retired.
+  2. `typecheck` ran a bare `tsc --strict …`, which defaults to `target: ES5`/`lib.es5` — it fails on `Array.prototype.includes` (`types/scene.ts`) and `SharedArrayBuffer` (`types/protocol.ts`). The design sessions' "tsc green" was true only under a scratch tsconfig. **Fix:** `tsconfig.base.json` pins `target`/`lib` with the strict flag set, every package extends it, and `verify-workspace.mjs` fails the build if `ci.yml` ever regresses to a project-less `tsc`. One source change was needed: `types/scene.typecheck.ts` now uses a type-only import (`verbatimModuleSyntax`).
+- **`pgsql-parser` pinned to the PG16 grammar**, matching `schema.sql`'s stated target. Unpinned, npm resolved the PG18 parser; pinning down to 13.x exposed that the schema legitimately uses `UNIQUE NULLS NOT DISTINCT` (PG15+). The check now parses under exactly the major that will run in production — PG17/18-only syntax can no longer pass a check the real server would reject.
+- **Produced `tools/verify-workspace.mjs`** (the P0 machine check, per the every-milestone-ships-a-companion precedent). It asserts the skeleton against its sources of truth rather than against itself: every package the roadmap §3 table names exists and **declares the phase that table assigns it** (`packages/shared` allowed as the documented non-phase); every declared contract doc exists; workspace globs and members cover each other; `.env.example` names **exactly** the `types/infra.ts` `SECRETS` inventory with every value empty; and `ci.yml` — parsed as YAML with `${{ matrix.* }}` expanded the way GitHub expands it — reaches every `tools/verify-*.mjs` through the root scripts, so adding a suite and forgetting to wire it fails the build. **GREEN**: positives clean, **7-negative battery all bite** (drop `apps/*` from the globs, cite a phantom contract doc, misdeclare the engine's phase, add a secret to `infra.ts` only, commit a value into `.env.example`, unwire the suites from CI, regress to a bare `tsc`).
+- **Env plumbing** per 10 §4: `.env.example` (names only, machine-tied to `SECRETS`), `.npmrc` (exact pins + committed lockfile — the 10 §4 supply-chain rule that keeps a transitive bump from silently re-keying a golden hash), `.gitignore`, `.nvmrc`.
+- **Verified — the P0 gate, run locally exactly as `ci.yml` runs it (`pnpm run ci`, exit 0):** strict `tsc` over the eleven design type files **and** all seven packages via turbo; `verify:workspace` GREEN (7/7 negatives bite); `verify:scene` green (schema compiles ajv-strict, both doc examples valid, 15 negatives rejected, 3 positive edge cases accepted); `verify:backend` ALL CHECKS PASSED (OpenAPI 3.1, DDL under the real PG16 grammar, 45 operations, three-way error-code equality); `verify:infra` ALL CHECKS PASSED (workflow structure, the three-way-pinned U9 matrix, migration runner E1–E4, isolation predicate); `verify:roadmap` GREEN (5/5 negatives bite). `pnpm install --frozen-lockfile` reproduces from the committed lockfile.
+- **No change to the scene format, engine constants, API (`openapi.yaml`), or DB schema (`schema.sql`)** — P0 touches build tooling and layout only. `determinism-matrix.yml` and `deploy.yml` are untouched; they stay stubbed until P2 and P8 respectively.
+
+**Unresolved issues (status after S13):** unchanged — **no new U-issue raised.** U26 (stubbed golden hashes) and U9 remain the P2 keystone; every other issue keeps its `12-ROADMAP.md` §6 disposition. One P1 housekeeping note, too small to be a U: the workspace has no test runner yet (`pnpm run test` is a turbo no-op), because nothing is implemented to test — P1 picks one when `scene-format` lands.
+
+**Next phase: P1 — `packages/scene-format`.** Move `scene.schema.json` and `types/scene.ts` into the package, add the `schemaVersion` migration runner (the reference implementation is already proven in `verify-infra.mjs` §E, with `SCENE_MIGRATIONS` empty at version 1), export the validation gate that client and server share (ADR-0004/ADR-0005), and add the package's unit tests. Definition of done unchanged: `verify:scene` green in CI + strict `tsc`. This package was fully authored and verified during design — **P1 is packaging, not design** — so the work is mechanical, and the interesting risk starts at P2.

@@ -1,0 +1,15 @@
+{
+  "name": "@physics/ai",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Prompt → scene pipeline: the build-time prompt compiler over the 02 tables, the structured-outputs shape rail, and the validation/repair loop that reuses procgen’s check.ts verbatim.",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "physics": {
+    "phase": "P6",
+    "contract": "docs/07-AI-PIPELINE.md"
+  }
+}
