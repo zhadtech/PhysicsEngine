@@ -1,8 +1,18 @@
 /**
  * Compile-time cross-check: the spec's example scenes must typecheck as `Scene`,
  * and the discriminated unions must narrow correctly. Not shipped; dev-only.
+ *
+ * P1 added the second half — the ties across the new package boundary. The
+ * scene format now lives in `packages/scene-format` while the surfaces that
+ * consume it (`api.ts`, `protocol.ts`) are still design-phase files here, so
+ * this is the one place both sides are visible at once.
  */
 import type { Scene, SceneObject, Link } from './scene';
+import type { ApiErrorCode, ApiFinding } from './api';
+import { SIM } from './protocol';
+import type { Finding } from '../packages/scene-format/src/findings';
+import type { GateErrorCode } from '../packages/scene-format/src/validate';
+import { BOUNDS_WARN_MARGIN_M } from '../packages/scene-format/src/semantic';
 import {
   MATERIAL_DEFAULTS,
   NAMED_ANCHORS,
@@ -84,6 +94,38 @@ const anchorCount = Object.keys(NAMED_ANCHORS).length;
 // Guards
 const t = 'marble';
 const flag = isObjectType(t) && isDynamicType(t);
+
+// ---------------------------------------------------------------------------
+// P1 ties: the scene-format package ↔ the surfaces that consume it
+// ---------------------------------------------------------------------------
+
+/**
+ * Every finding the gate produces is a finding the API can carry (05 §5.2).
+ * `ApiFinding` is the wire shape; `Finding` is what `validateScene` returns.
+ * Widening one without the other stops compiling here.
+ */
+const _findingTie: Finding extends ApiFinding ? true : never = true;
+
+/**
+ * The gate may only fail with a code the API already declares.
+ * `verify-backend.mjs` holds `ApiErrorCode` to a three-way equality with the
+ * OpenAPI enum and the 05 §5.2 table, so this keeps the gate inside a set that
+ * is checked end to end — inventing an `E_MIGRATION` here would fail to build
+ * rather than surface as an undocumented status code in production.
+ */
+const _gateCodeTie: GateErrorCode extends ApiErrorCode ? true : never = true;
+
+/**
+ * W10 warns exactly where DET-10 deletes the body (03 §3). The margins are two
+ * numbers in two packages; if the engine moves its removal boundary, the
+ * builder's "outside the table" warning must move with it, or the panel starts
+ * lying about which objects survive the run.
+ */
+const _marginTie: typeof BOUNDS_WARN_MARGIN_M extends typeof SIM.REMOVAL_MARGIN_M ? true : never = true;
+
+void _findingTie;
+void _gateCodeTie;
+void _marginTie;
 
 export const _check = [
   example1,

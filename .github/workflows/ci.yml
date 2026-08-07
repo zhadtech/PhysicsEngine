@@ -74,8 +74,11 @@ jobs:
       - name: verify ${{ matrix.suite }}
         run: pnpm run verify:${{ matrix.suite }}
 
-  # Package unit tests across CI_NODE_VERSIONS (types/infra.ts). A no-op while
-  # the packages are P0 skeletons; it becomes real at P1 with scene-format.
+  # Package unit tests across CI_NODE_VERSIONS (types/infra.ts). Real since P1:
+  # `pnpm run test` is `turbo run test`, and the test task carries a self-edge on
+  # `build`, so the packages are compiled before their suites run. That matters
+  # for the '20' leg specifically — Node 20 cannot strip TypeScript, which is why
+  # scene-format emits and its suites import from dist/ (D30).
   unit:
     runs-on: ubuntu-latest
     strategy:

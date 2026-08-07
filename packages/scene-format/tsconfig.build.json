@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "_comment": [
+    "Emit config (P1/D30). The typecheck config inherits noEmit from the shared",
+    "base; this one turns emission on for `pnpm run build`, which the package's",
+    "node:test suite and every downstream Node consumer (apps/api at P4) load.",
+    "rootDir is the package root so ../scene.schema.json — imported by",
+    "src/validate.ts — is emitted to dist/scene.schema.json, keeping the relative",
+    "specifier valid in both the source tree and dist."
+  ],
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": ".",
+    "declaration": true
+  }
+}

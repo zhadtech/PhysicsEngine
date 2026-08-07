@@ -4,9 +4,36 @@
   "private": true,
   "type": "module",
   "description": "Scene document schema, TypeScript types, validation gate and schemaVersion migrations — the one definition of a valid scene, imported by client and server alike.",
-  "main": "src/index.ts",
+  "_comment": [
+    "P1: this is the first package with real code, so it sets the build posture",
+    "(D30). It emits, because the ci.yml `unit` job runs the tests on Node 20 as",
+    "well as 22 — Node 20 cannot strip TypeScript, so tests run against emitted",
+    "JS via node:test with no new test-runner dependency. rootDir is the package",
+    "root (not src/) so the normative scene.schema.json, which validate.ts",
+    "imports, is emitted beside the code and resolves identically from source and",
+    "from dist; that is the only reason for the dist/src/ nesting, which the",
+    "exports map hides from every consumer."
+  ],
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./scene.schema.json": "./scene.schema.json"
+  },
+  "files": [
+    "dist",
+    "scene.schema.json"
+  ],
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "ajv": "8.20.0"
   },
   "physics": {
     "phase": "P1",

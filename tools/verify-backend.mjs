@@ -20,13 +20,13 @@ const diff = (a, b) => [...a].filter((x) => !b.has(x));
 const yamlText = readRepo('openapi.yaml');
 const sql = readRepo('schema.sql');
 const apiTs = readRepo('types/api.ts');
-const sceneTs = readRepo('types/scene.ts');
+const sceneTs = readRepo('packages/scene-format/src/scene.ts');
 const aiTs = readRepo('types/ai.ts');
 const communityTs = readRepo('types/community.ts');
 const protocolTs = readRepo('types/protocol.ts');
 const doc05 = readRepo('docs/05-BACKEND.md');
 const doc08 = readRepo('docs/08-COMMUNITY.md');
-const sceneSchema = readRepoJson('scene.schema.json');
+const sceneSchema = readRepoJson('packages/scene-format/scene.schema.json');
 
 // --- 1. OpenAPI 3.1 meta-schema validity -----------------------------------
 const spec = parseYaml(yamlText);
