@@ -136,7 +136,7 @@ function runMigrations(doc, registry, target) {
   return out;
 }
 
-const schema = readRepoJson('scene.schema.json');
+const schema = readRepoJson('packages/scene-format/scene.schema.json');
 const ajv = new Ajv2020.default({ strict: true, allErrors: true });
 const validateScene = ajv.compile(schema);
 const CURRENT = 1; // === MIGRATION.currentSchemaVersion / SCHEMA_VERSION

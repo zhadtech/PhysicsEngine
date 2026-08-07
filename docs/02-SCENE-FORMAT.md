@@ -2,7 +2,7 @@
 
 **Status:** Accepted (Session 2, 2026-07-19) — normative for schemaVersion 1
 **Implements:** ADR-0005 (scene format principles)
-**Companion files:** `scene.schema.json` (normative JSON Schema), `types/scene.ts` (TypeScript interfaces)
+**Companion files:** `packages/scene-format/scene.schema.json` (normative JSON Schema), `packages/scene-format/src/scene.ts` (TypeScript interfaces) — both moved into the package at P1; `tools/verify-scene.mjs` part T holds this document, the schema and the types to one catalog.
 **Consumed by:** M2 (simulation core), M3 (builder), M4 (backend validation), M5 (procgen), M6 (AI generation)
 
 ---

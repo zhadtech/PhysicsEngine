@@ -37,7 +37,11 @@ importers:
 
   packages/procgen: {}
 
-  packages/scene-format: {}
+  packages/scene-format:
+    dependencies:
+      ajv:
+        specifier: 8.20.0
+        version: 8.20.0
 
   packages/shared: {}
 

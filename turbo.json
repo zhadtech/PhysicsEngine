@@ -9,12 +9,12 @@
     },
     "build": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**", "tsconfig.json"],
+      "inputs": ["src/**", "*.json", "tsconfig.json", "tsconfig.build.json", "../../tsconfig.base.json"],
       "outputs": ["dist/**"]
     },
     "test": {
-      "dependsOn": ["^build"],
-      "inputs": ["src/**", "test/**"],
+      "dependsOn": ["^build", "build"],
+      "inputs": ["src/**", "test/**", "*.json"],
       "outputs": []
     }
   }

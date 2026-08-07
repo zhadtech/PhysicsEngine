@@ -152,21 +152,21 @@ export function grantsIsolation(headers: {
 // ---------------------------------------------------------------------------
 
 /**
- * A single-step forward migration of a scene document. The runner (10 §5,
- * proven in verify-infra.mjs) chains these from a document's `schemaVersion` up
- * to `MIGRATION.currentSchemaVersion`, then re-validates against scene.schema.json.
+ * A single-step forward migration of a scene document, and the registry of them.
+ *
+ * The runner chains these from a document's `schemaVersion` up to
+ * `MIGRATION.currentSchemaVersion`, then re-validates against the schema.
  * Contract enforced by the runner: `to === from + 1` (gap-free), migrations are
  * ordered and total up to current, and the output re-validates (fail ⇒ E_MIGRATION).
- * The registry lives in the `scene-format` package; it is empty at schemaVersion 1.
+ *
+ * P1 moved both into `packages/scene-format` — where §5.2 always said the
+ * registry belongs, and where the runner is now implemented rather than
+ * described (`src/migrate.ts`, exercised by the package's unit suite against the
+ * same E1–E4 fixtures `verify-infra.mjs` §E proved against a reference). They
+ * are re-exported here so this file's surface is unchanged.
  */
-export interface SchemaMigration {
-  readonly from: number;
-  readonly to: number;
-  readonly describe: string;
-  migrate(doc: Record<string, unknown>): Record<string, unknown>;
-}
-
-export const SCENE_MIGRATIONS: readonly SchemaMigration[] = [];
+export type { SchemaMigration } from '../packages/scene-format/src/migrate';
+export { SCENE_MIGRATIONS, runMigrations, MigrationError } from '../packages/scene-format/src/migrate';
 
 export const MIGRATION = {
   /** Documents are migrated up to here at load and by the offline backfill job (§5). */
