@@ -4,9 +4,39 @@
   "private": true,
   "type": "module",
   "description": "Deterministic simulation core: the pinned Rapier2D wrapper, Web-Worker host + SAB triple-buffer transport, dmath, the custom force and Gauss-Seidel constraint layers, analytics and snapshot/reset. The same core runs in Node for CI and replay.",
-  "main": "src/index.ts",
+  "_comment": [
+    "Build posture is D30, set at P1: emit to dist/, test the emitted JS with",
+    "node:test, because ci.yml's `unit` job spans Node 20, which cannot strip",
+    "TypeScript. rootDir is the package root for the same reason scene-format",
+    "uses one — assets beside the code (here: goldens/) keep one relative path",
+    "that resolves from both src/ and dist/.",
+    "`./protocol` is a second entry point so the design-phase type files can",
+    "re-export the worker protocol without pulling the simulation core in with",
+    "it; types/protocol.ts is that stub."
+  ],
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./protocol": {
+      "types": "./dist/src/protocol.d.ts",
+      "default": "./dist/src/protocol.js"
+    }
+  },
+  "files": [
+    "dist",
+    "goldens"
+  ],
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@physics/scene-format": "workspace:*"
   },
   "physics": {
     "phase": "P2",

@@ -23,7 +23,10 @@ const apiTs = readRepo('types/api.ts');
 const sceneTs = readRepo('packages/scene-format/src/scene.ts');
 const aiTs = readRepo('types/ai.ts');
 const communityTs = readRepo('types/community.ts');
-const protocolTs = readRepo('types/protocol.ts');
+// Moved into the engine package at P2 (types/protocol.ts is a re-export stub
+// now, exactly as types/scene.ts became one at P1). This suite reads the real
+// declarations, so it follows the file rather than the stub.
+const protocolTs = readRepo('packages/engine/src/protocol.ts');
 const doc05 = readRepo('docs/05-BACKEND.md');
 const doc08 = readRepo('docs/08-COMMUNITY.md');
 const sceneSchema = readRepoJson('packages/scene-format/scene.schema.json');

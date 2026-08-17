@@ -471,6 +471,88 @@ export const WORLD_DEFAULTS = {
   bounds: [4, 2.4] as Vec2,
 } as const;
 
+/**
+ * Per-type `props` defaults (spec §5.3, the "def" in each catalog row).
+ *
+ * Added at P2. DET-4 says defaults are "filled from the single tables in
+ * `types/scene.ts`" — but until now no such table existed for the *geometric*
+ * props: the values lived in the §5.3 prose, in the builder's inspector
+ * descriptors (`types/editor.ts`), and nowhere a simulator could read them. The
+ * schema deliberately carries ranges only (D8), so it could not serve either.
+ * The engine cannot expand a prefab without them, so the table DET-4 assumes
+ * exists is written out here, where the format owns it and every consumer —
+ * engine, builder, procgen, AI, server-side replay — reads the same numbers.
+ *
+ * This states the already-normative defaults; it changes none of them.
+ * `verify-scene.mjs` part U holds this table, the §5.3 prose and the builder
+ * descriptors to the same values.
+ *
+ * Optional props with no default (`lever.minAngle`, `rope.length`,
+ * `springLink.restLength`, `gearMesh.ratio`) are absent here by design: their
+ * "default" is derived at load from the initial layout, which is the engine's
+ * job, not a constant. The two *list*-valued defaults (`trigger.targets` and
+ * `rope.via`, both `[]`) are absent for a different reason: a shared mutable
+ * array as a module-level constant is a footgun, so consumers materialize a
+ * fresh one. `goal.accepts` is here because its default `"any"` is a scalar
+ * sentinel, not a list.
+ */
+export const PROP_DEFAULTS = {
+  platform: { w: 1, h: 0.05 },
+  ramp: { w: 0.5, h: 0.3, flip: false },
+  curve: { r: 0.4, thickness: 0.03, sweep: 90, flip: false },
+  domino: { h: 0.08 },
+  marble: { r: 0.025 },
+  crate: { w: 0.08, h: 0.08 },
+  plank: { w: 0.4, h: 0.02 },
+  gear: { r: 0.1, motorSpeed: 0, maxTorque: 0.5 },
+  lever: { len: 0.4, h: 0.02, pivot: 0.5 },
+  spring: { w: 0.1, travel: 0.08, stiffness: 25, damping: 0.5, mode: 'passive' },
+  pendulum: { len: 0.3, bobR: 0.04, arm: 'rod' },
+  piston: { stroke: 0.15, w: 0.06, speed: 0.2, force: 5, mode: 'cycle', period: 2, phase: 0 },
+  conveyor: { w: 0.5, h: 0.05, speed: 0.3, active: true },
+  pulley: { r: 0.06 },
+  fan: { strength: 0.4, range: 0.5, spread: 25, active: true },
+  magnet: { strength: 3, range: 0.4, active: true },
+  trigger: { w: 0.1, h: 0.1, once: true },
+  goal: { w: 0.1, h: 0.1, accepts: 'any' },
+} as const satisfies { [T in ObjectType]: Readonly<Record<string, number | boolean | string>> };
+
+/** Per-type link `props` defaults (spec §6.2). Same rationale as `PROP_DEFAULTS`. */
+export const LINK_PROP_DEFAULTS = {
+  rope: { segments: 0 },
+  springLink: { stiffness: 50, damping: 0.5 },
+  weld: {},
+  axle: { motorSpeed: 0, maxTorque: 0.5 },
+  gearMesh: {},
+} as const satisfies { [T in LinkType]: Readonly<Record<string, number | boolean | string>> };
+
+/**
+ * Contact-material defaults for the types that have no entry in
+ * `MATERIAL_DEFAULTS` — every static surface (spec §5.2: "static objects expose
+ * only `friction` and `restitution`").
+ *
+ * §5.2 gives those two props the default "per type", but §5.3 lists per-type
+ * material values for the dynamic-bodied types only, so a platform's friction
+ * was never actually stated. Found at P2, when the engine needed a number to
+ * build a collider with. 0.5 is the value the 04 §3 inspector wireframe shows
+ * for a selected platform; restitution 0 means "this surface adds no bounce",
+ * leaving bounciness a property of the thing that hits it. Recorded in 02 §5.2
+ * as a pre-release clarification (the D8 mechanism — the format is unreleased,
+ * so a gap is filled in place with a changelog note).
+ *
+ * How the pair of coefficients at a contact combines into one is a *solver*
+ * question, not a format one: it belongs to the engine's collider setup at P2b.
+ */
+export const STATIC_SURFACE_DEFAULTS = { friction: 0.5, restitution: 0 } as const;
+
+/** Defaults shared by every dynamic body (spec §5.2), beyond the per-type material. */
+export const DYN_COMMON_DEFAULTS = {
+  magnetic: false,
+  anchored: false,
+  vel: [0, 0] as Vec2,
+  angVel: 0,
+} as const;
+
 /** Types whose primary body is dynamic (can move; accept DynProps). */
 export const DYNAMIC_TYPES: readonly ObjectType[] = [
   'domino',

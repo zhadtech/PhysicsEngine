@@ -1,0 +1,107 @@
+{
+  "$comment": [
+    "Cross-engine golden for dmath (DET-5). Regenerating this file is an",
+    "engineVersion-level event: if the digest below changes, every state hash",
+    "in the repo changes with it, because expansion angles feed every pose.",
+    "`digest` is what tools/dmath-digest.mjs prints; verify-engine.mjs runs that",
+    "file under Node (V8) and, when the binary is present, under JavaScriptCore",
+    "— the WebKit leg of the browser triple — and requires both to match this.",
+    "`spots` are IEEE-754 bit patterns (hex, high word first) for the angles",
+    "real scenes are built from, so a regression names an angle rather than just",
+    "moving a checksum."
+  ],
+  "algorithm": "fdlibm kernels, Cody-Waite reduction, exact-ops only",
+  "sweep": {
+    "samples": 20000,
+    "domain": "|x| <= 4*pi",
+    "functions": [
+      "dsin",
+      "dcos",
+      "datan2",
+      "datan",
+      "rotate"
+    ]
+  },
+  "digest": "d859ce99",
+  "measuredOn": {
+    "$comment": "Engines this digest has been observed identical on. The browser triple joins them in CI at P2c.",
+    "v8": "node 24.13.0 (darwin-arm64)",
+    "javascriptcore": "macOS system jsc (darwin-arm64)"
+  },
+  "spots": {
+    "0": {
+      "x": "0000000000000000",
+      "dsin": "0000000000000000",
+      "dcos": "3ff0000000000000"
+    },
+    "1": {
+      "x": "3ff0000000000000",
+      "dsin": "3feaed548f090cee",
+      "dcos": "3fe14a280fb5068c"
+    },
+    "30deg": {
+      "x": "3fe0c152382d7365",
+      "dsin": "3fdfffffffffffff",
+      "dcos": "3febb67ae8584cab"
+    },
+    "45deg": {
+      "x": "3fe921fb54442d18",
+      "dsin": "3fe6a09e667f3bcc",
+      "dcos": "3fe6a09e667f3bcd"
+    },
+    "90deg": {
+      "x": "3ff921fb54442d18",
+      "dsin": "3ff0000000000000",
+      "dcos": "3c91a62633145c07"
+    },
+    "180deg": {
+      "x": "400921fb54442d18",
+      "dsin": "3ca1a62633145c07",
+      "dcos": "bff0000000000000"
+    },
+    "-90deg": {
+      "x": "bff921fb54442d18",
+      "dsin": "bff0000000000000",
+      "dcos": "3c91a62633145c07"
+    },
+    "270deg": {
+      "x": "4012d97c7f3321d2",
+      "dsin": "bff0000000000000",
+      "dcos": "bcaa79394c9e8a0a"
+    },
+    "curve start -90deg": {
+      "x": "bff921fb54442d18",
+      "dsin": "bff0000000000000",
+      "dcos": "3c91a62633145c07"
+    },
+    "curve step 7.5deg": {
+      "x": "3fc0c152382d7365",
+      "dsin": "3fc0b5150f6da2d0",
+      "dcos": "3fefb9ea92ec689b"
+    },
+    "4pi": {
+      "x": "402921fb54442d18",
+      "dsin": "bcc1a62633145c07",
+      "dcos": "3ff0000000000000"
+    },
+    "-4pi": {
+      "x": "c02921fb54442d18",
+      "dsin": "3cc1a62633145c07",
+      "dcos": "3ff0000000000000"
+    },
+    "-0.0001": {
+      "x": "bf1a36e2eb1c432d",
+      "dsin": "bf1a36e2ea609cc8",
+      "dcos": "3feffffffd50ce24"
+    }
+  },
+  "datan2": {
+    "(1,0)": "3ff921fb54442d18",
+    "(0,-1)": "400921fb54442d18",
+    "(-0,-1)": "c00921fb54442d18",
+    "(1,1)": "3fe921fb54442d18",
+    "(0.3,-0.7)": "4005e4c36ca0118a",
+    "(-2,5)": "bfd85a376b677dc0"
+  },
+  "datan1": "3fe921fb54442d18"
+}

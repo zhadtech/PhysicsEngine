@@ -33,7 +33,11 @@ importers:
 
   packages/ai: {}
 
-  packages/engine: {}
+  packages/engine:
+    dependencies:
+      '@physics/scene-format':
+        specifier: workspace:*
+        version: link:../scene-format
 
   packages/procgen: {}
 

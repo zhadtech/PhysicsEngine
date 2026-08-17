@@ -43,7 +43,7 @@ Top-level shape:
 | Scale | Desk scale ("workshop table"): default domino is 8 cm tall, default marble radius 2.5 cm, default board 4 × 2.4 m. Defaults are just defaults; bounds may grow to 200 m for big machines. |
 | Rotation `rot` | Rotation of the object around its own reference point (defined per type in the catalog), in degrees. |
 | 2D density | `density` is mass per **area** (kg/m²), because physics is 2D. Catalog defaults are tuned so relative masses feel right (marble ≈ 5 g, domino ≈ 8 g). A global tuning pass happens in M2. |
-| Number precision | Writers emit at most **4 fractional digits** on every number (positions: 0.1 mm; angles: within 0.0001°). Readers accept any precision (tolerant reader). Quantization is a writer rule, *not* schema-enforced, because `multipleOf` on decimals is unreliable in floating point. |
+| Number precision | Writers emit at most **4 fractional digits** on every number (positions: 0.1 mm; angles: within 0.0001°). Readers accept any precision (tolerant reader). Quantization is a writer rule, *not* schema-enforced, because `multipleOf` on decimals is unreliable in floating point. **The quantization function is exactly `Math.round(x · 1e4) / 1e4`, with `−0` normalized to `0`** — the same expression 03 DET-4 applies on read, and *not* a decimal formatter such as `toFixed(4)`. The two are not the same function: `Math.round` breaks ties toward +∞ while `toFixed` breaks them away from zero, so they disagree on every *negative* value whose `× 1e4` product lands on an exact `.5` tie (17 712 of the 35 424 such 5-decimal values within ±2 m). A writer built the obvious way would emit `−0.9877` where the reader quantizes to `−0.9876`, and `expand(scene)` would no longer equal `expand(parse(serialize(scene)))` — the round-trip identity of 03 §12. Stated explicitly at P2, when the reader was first implemented. |
 | Defaults | Defaults are defined by this spec and the schema, and are **omitted from files** (strict writer). A value equal to the default should not be written. |
 | Unknown fields | Readers preserve unknown fields where safe and ignore them for simulation; writers never emit fields outside this spec (ADR-0005 rule 6). |
 
@@ -111,7 +111,9 @@ These apply to every object whose body is dynamic (marked **[dyn]** in the catal
 | `vel` | `[vx, vy]` | `[0, 0]` | each −50–50 | Initial linear velocity, m/s. An *input*, allowed by ADR-0005. |
 | `angVel` | number | `0` | −3600–3600 | Initial angular velocity, deg/s. |
 
-Static objects (**[static]**) expose only `friction` and `restitution` from this table.
+Static objects (**[static]**) expose only `friction` and `restitution` from this table. Their defaults are **`friction` 0.5, `restitution` 0** (`STATIC_SURFACE_DEFAULTS` in the format package): the per-type material rows in §5.3 cover the dynamic-bodied types only, so "per type" above had no value to resolve to for a platform or a ramp. Filled in at P2, when the engine needed a number to build a collider with; 0.5 is the value the 04 §3 inspector wireframe already showed for a selected platform, and restitution 0 means a static surface adds no bounce of its own.
+
+**Where the machine-readable defaults live.** Every default in §5.3 and §6.2 is also a table in the format package — `PROP_DEFAULTS`, `LINK_PROP_DEFAULTS`, `MATERIAL_DEFAULTS`, `WORLD_DEFAULTS`, `STATIC_SURFACE_DEFAULTS`, `DYN_COMMON_DEFAULTS` — because 03 DET-4 requires defaults to be filled from one source and the JSON Schema deliberately carries ranges only. `verify-scene.mjs` part U holds the prose here, those tables, and the builder's inspector descriptors to the same values.
 
 ### 5.3 Object catalog (18 types)
 
@@ -344,4 +346,5 @@ Defaults do the rest: gravity 9.81, board 4 × 2.4 m, marble r 2.5 cm, dominoes 
 
 ## 13. Changelog
 
+- **2026-08-17 (Session 15, P2a — clarifications, no value changed):** two things this spec left implicit, found by implementing the reader. (1) §2 now states the quantization *function* (`Math.round(x · 1e4) / 1e4`, `−0 → 0`) rather than only the digit count, because `toFixed(4)` is a different function on negative ties and would break the 03 §12 round-trip identity. (2) §5.2 now states the static-surface defaults (`friction` 0.5, `restitution` 0), which were previously "per type" with no per-type row to resolve to for any static type. Both are gaps filled in place — no existing default moved, schemaVersion stays 1 — and both are now machine-checked (`verify-scene.mjs` part U, `verify-engine.mjs`).
 - **2026-07-19 (Session 3, M2 tuning pass — D8):** pre-release amendment of v1 defaults after the analytic tuning pass (03 §13): `spring.stiffness` default 80 → **25** N/m; `fan.strength` default 2 → **0.4** N; `magnet.strength` unit anchored as newtons at the 5 cm reference distance (03 §7.2 formula; value unchanged). Ranges, schema, and everything else unchanged. schemaVersion stays 1 — the format is unreleased and no scenes exist outside this repository; after release the same change would have required schemaVersion 2 + migration (§9).

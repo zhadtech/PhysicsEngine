@@ -1,0 +1,383 @@
+#!/usr/bin/env node
+// verify-engine.mjs — the P2 check.
+//
+// P2's deliverable is *determinism*, so its quality bar is that the properties
+// determinism rests on are machine-checked rather than reviewed. The package's
+// node:test suites cover behaviour inside one process; this covers the four
+// things a unit test structurally cannot:
+//
+//   A. **Discipline.** DET-5 bans the unspecified `Math` transcendentals in
+//      this package and 03 §1 bans the environment. A test cannot notice that
+//      someone added `Math.sin` to a new file — only a scan of the source can.
+//   B. **Cross-engine identity.** The whole point of dmath is producing the
+//      same bits on a *different* engine, which is unobservable from inside
+//      one. This runs tools/dmath-digest.mjs under Node (V8) and, when the
+//      binary is there, under JavaScriptCore — the WebKit leg of the browser
+//      triple — and holds both to the committed golden.
+//   C. **Correspondence with 03.** Every engine constant is normative prose
+//      somewhere in the spec, and the two drift silently.
+//   D. **Vocabulary closure.** The pieces geometry emits must be the pieces the
+//      protocol declares, or the renderer indexes a body slot that is not there.
+//
+// This does NOT introduce a phase exit criterion: P2's definition of done is
+// still `determinism-matrix.yml` green with real golden hashes (12-ROADMAP §5).
+// It is a check *inside* ci.yml, the role verify-scene.mjs plays for the format.
+//
+// Zero dependencies. Run: `pnpm run verify:engine` (builds the package first —
+// the digest probe runs the emitted JS, because that is what ships).
+
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
+import { ROOT, readRepo, readRepoJson, repoPath } from './repo.mjs';
+
+const DIST = repoPath('packages/engine/dist/src/index.js');
+if (!existsSync(DIST)) {
+  console.error(
+    'packages/engine is not built — the cross-engine probe runs the emitted JS.\n' +
+      'Run: pnpm run build   (or pnpm run verify:engine, which builds first)',
+  );
+  process.exit(2);
+}
+const engine = await import(new URL(`file://${DIST}`).href);
+// The catalog itself belongs to the format package — the engine must expand
+// exactly the types the format defines, not a list of its own.
+const format = await import(new URL(`file://${repoPath('packages/scene-format/dist/src/index.js')}`).href);
+
+/** macOS ships the JavaScriptCore shell; Linux CI does not. Absence is not a failure. */
+const JSC = '/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc';
+
+// ---------------------------------------------------------------------------
+// Source scanning
+// ---------------------------------------------------------------------------
+
+function walk(dir, out = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) walk(p, out);
+    else if (entry.name.endsWith('.ts')) out.push(p);
+  }
+  return out;
+}
+
+/**
+ * Strip comments and string bodies so the lint reads code, not prose.
+ *
+ * dmath.ts's own header discusses `Math.sin` at length — that is documentation
+ * of why the ban exists, and a lint that cannot tell the difference would force
+ * the explanation out of the file that needs it most.
+ */
+function stripNonCode(src) {
+  let out = '';
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i];
+    const d = src[i + 1];
+    if (c === '/' && d === '/') {
+      while (i < n && src[i] !== '\n') i++;
+    } else if (c === '/' && d === '*') {
+      i += 2;
+      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
+      i += 2;
+    } else if (c === '"' || c === "'" || c === '`') {
+      const quote = c;
+      i++;
+      while (i < n && src[i] !== quote) i += src[i] === '\\' ? 2 : 1;
+      i++;
+      out += '""';
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return out;
+}
+
+/**
+ * The `Math` members ECMA-262 pins to an exact result. Everything else is
+ * "implementation-approximated" and therefore banned here (DET-5). This is an
+ * allow-list on purpose: a member added to the language later is banned until
+ * someone establishes that it is exact.
+ */
+const EXACT_MATH = new Set([
+  'abs', 'ceil', 'clz32', 'floor', 'fround', 'imul', 'max', 'min', 'round', 'sign', 'sqrt', 'trunc', 'PI',
+]);
+
+/** Ambient state a deterministic core may not read (03 §1 rule 1). */
+const BANNED_GLOBALS = [
+  'Date', 'performance', 'setTimeout', 'setInterval', 'queueMicrotask', 'requestAnimationFrame',
+  'document', 'window', 'localStorage', 'sessionStorage', 'fetch', 'XMLHttpRequest', 'navigator', 'process',
+];
+
+/**
+ * Locale-sensitive APIs, banned across the whole package. DET-3 orders by byte;
+ * `localeCompare` orders by locale, which is the same answer on the developer's
+ * machine and a different one on a CI runner with a different ICU build.
+ */
+const BANNED_LOCALE = ['localeCompare', 'toLocaleString', 'toLocaleDateString', 'Intl'];
+
+/**
+ * 03 §1: "Only worker.ts/transport.ts know about the browser." Those two files
+ * are the shell; everything else — all of sim/ — is environment-free.
+ */
+const SHELL_FILES = new Set(['src/worker.ts', 'src/transport.ts']);
+
+function lintFindings(srcFiles) {
+  const findings = [];
+  for (const [rel, text] of Object.entries(srcFiles)) {
+    const code = stripNonCode(text);
+    for (const m of code.matchAll(/\bMath\.([A-Za-z0-9_]+)/g)) {
+      if (!EXACT_MATH.has(m[1])) findings.push({ rel, what: `Math.${m[1]}`, why: 'DET-5: not an exactly-specified operation' });
+    }
+    for (const name of BANNED_LOCALE) {
+      if (new RegExp(`\\b${name}\\b`).test(code)) findings.push({ rel, what: name, why: 'DET-3: locale-sensitive' });
+    }
+    if (SHELL_FILES.has(rel)) continue;
+    for (const name of BANNED_GLOBALS) {
+      if (new RegExp(`\\b${name}\\b`).test(code)) findings.push({ rel, what: name, why: '03 §1: SimCore is environment-free' });
+    }
+  }
+  return findings;
+}
+
+// ---------------------------------------------------------------------------
+// Constant ↔ spec correspondence
+// ---------------------------------------------------------------------------
+
+/** Escape a number for a regex, tolerating the doc's Unicode minus. */
+const numRe = (v) => String(v).replace('-', '[-−]').replace('.', '\\.');
+
+/**
+ * Each engine constant, and the prose in 03 that fixes it. The pattern is built
+ * from the *code's* value, so changing one side without the other fails — which
+ * is the only reason a table like this earns its keep.
+ */
+const SIM_IN_SPEC = {
+  DT: (v) => (v === 1 / 60 ? /dt = 1\/60/ : null),
+  HARD_CAP_S: (v) => new RegExp(`HARD_CAP_S = ${numRe(v)}`),
+  MAX_CATCHUP_STEPS: (v) => new RegExp(`MAX_CATCHUP = ${numRe(v)}`),
+  REMOVAL_SWEEP_STEPS: (v) => new RegExp(`Every ${numRe(v)} steps`),
+  REMOVAL_MARGIN_M: (v) => new RegExp(`inflated by ${numRe(v)} m`),
+  MAX_DYNAMIC_BODIES: (v) => new RegExp(`MAX_DYNAMIC_BODIES = ${numRe(v)}`),
+  CUSTOM_SOLVER_ITERATIONS: (v) => new RegExp(`CUSTOM_SOLVER_ITERATIONS = ${numRe(v)}`),
+  FIELD_WAKE_FACTOR: (v) => new RegExp(`FIELD_WAKE_FACTOR = ${numRe(v)}`),
+  MAGNET_REF_DIST: (v) => new RegExp(`MAGNET_REF_DIST = ${numRe(v)} m`),
+  CONVEYOR_MAX_ACCEL: (v) => new RegExp(`CONVEYOR_MAX_ACCEL = ${numRe(v)}`),
+  ROPE_BIAS_BETA: (v) => new RegExp(`ROPE_BIAS_BETA = ${numRe(v)}`),
+  ROPE_SLOP: (v) => new RegExp(`ROPE_SLOP = ${numRe(v)}`),
+  V_ACT: (v) => new RegExp(`V_ACT = ${numRe(v)} m/s`),
+  // Stored in radians, specified in degrees — the conversion is the check.
+  W_ACT: (v) => (Math.abs(v - (10 * Math.PI) / 180) < 1e-18 ? /W_ACT = 10 °\/s/ : null),
+  CHAIN_WINDOW_STEPS: (v) => new RegExp(`CHAIN_WINDOW = ${numRe(v)}`),
+  IDLE_WINDOW_S: (v) => new RegExp(`IDLE_WINDOW_S = ${numRe(v)}`),
+  MAX_SFX_EVENTS_PER_BATCH: (v) => new RegExp(`capped at ${numRe(v)} per batch`),
+};
+
+/** The §6 expansion table's fixed dimensions. Same construction. */
+const EXPAND_IN_SPEC = {
+  DOMINO_W_OVER_H: (v) => (v === 1 / 5 ? /\(h\/5\) × h/ : null),
+  SPRING_BASE_H: (v) => new RegExp(`Fixed base cuboid \`w × ${numRe(v)}\``),
+  SPRING_PLATE_H: (v) => new RegExp(`dynamic plate cuboid \`w × ${numRe(v)}\``),
+  PISTON_BASE_H: (v) => new RegExp(`Fixed base cuboid \`w × ${numRe(v)}\``),
+  PISTON_HEAD_H: (v) => new RegExp(`dynamic head cuboid \`w × ${numRe(v)}\``),
+  PENDULUM_ARM_W: (v) => new RegExp(`arm cuboid \`${numRe(v)} × len\``),
+  PENDULUM_ARM_DENSITY: (v) => new RegExp(`fixed density ${numRe(v)}`),
+  ROPE_SEGMENT_RADIUS: (v) => new RegExp(`radius ${numRe(v)}`),
+  ROPE_SEGMENT_DENSITY: (v) => new RegExp(`density ${numRe(v)}`),
+  CURVE_DEG_PER_SEGMENT: (v) => new RegExp(`ceil\\(sweep_deg / ${numRe(v)}\\)`),
+  CURVE_MIN_SEGMENTS: (v) => new RegExp(`N = max\\(${numRe(v)},`),
+  CURVE_START_DEG: (v) => new RegExp(`start angle \\*\\*${numRe(v)}°\\*\\*`),
+};
+
+// ---------------------------------------------------------------------------
+// Load the world once, so the negative battery can mutate a copy of it.
+// ---------------------------------------------------------------------------
+
+function runDigest(cmd, args) {
+  try {
+    return execFileSync(cmd, args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  } catch (err) {
+    return `ERROR: ${err.message?.split('\n')[0] ?? String(err)}`;
+  }
+}
+
+/** Every piece name the geometry table can emit, across the whole catalog. */
+function producedPieces() {
+  const pieces = new Set();
+  for (const type of format.OBJECT_TYPES) {
+    for (const props of [undefined, { arm: 'rope' }, { mode: 'triggered' }]) {
+      let obj;
+      try {
+        obj = engine.canonicalize({
+          schemaVersion: 1,
+          engineVersion: '0.0.0',
+          world: {},
+          objects: [{ id: 'x', type, pos: [0, 0], ...(props ? { props } : {}) }],
+        }).objects[0];
+      } catch {
+        continue; // props that do not apply to this type
+      }
+      try {
+        for (const p of engine.objectGeometry(obj).pieces) pieces.add(p.piece);
+      } catch {
+        /* a type that rejects these props keeps its default expansion */
+      }
+    }
+  }
+  return pieces;
+}
+
+function loadWorld() {
+  const srcDir = repoPath('packages/engine/src');
+  const srcFiles = {};
+  for (const abs of walk(srcDir)) srcFiles[abs.slice(repoPath('packages/engine').length + 1)] = readRepo(abs.slice(ROOT.length + 1));
+
+  const rng = new engine.Pcg32(42, 54);
+  return {
+    srcFiles,
+    doc03: readRepo('docs/03-SIMULATION-CORE.md'),
+    procgenSrc: readRepo('types/procgen.ts'),
+    golden: readRepoJson('packages/engine/goldens/dmath.golden.json'),
+    digests: {
+      v8: runDigest(process.execPath, ['tools/dmath-digest.mjs']),
+      jsc: existsSync(JSC) ? runDigest(JSC, ['-m', 'tools/dmath-digest.mjs']) : null,
+    },
+    sim: { ...engine.SIM },
+    expand: { ...engine.EXPAND },
+    pieces: producedPieces(),
+    pieceUnion: srcFiles['src/protocol.ts'] ?? '',
+    indexSrc: srcFiles['src/index.ts'] ?? '',
+    pcg: Array.from({ length: 6 }, () => rng.next()),
+    goldenFileExists: existsSync(repoPath('packages/engine/goldens/dmath.golden.json')),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The checks.
+// ---------------------------------------------------------------------------
+
+function runChecks(w, log) {
+  let fails = 0;
+  const A = (cond, msg) => {
+    if (cond) { if (log) console.log(`  ok   ${msg}`); }
+    else { if (log) console.log(`  FAIL ${msg}`); fails++; }
+  };
+  const H = (h) => { if (log) console.log(`\n${h}`); };
+
+  // -- A. DET-5 / environment discipline ------------------------------------
+  H('A. Determinism discipline (DET-5, 03 §1)');
+  const findings = lintFindings(w.srcFiles);
+  A(
+    findings.length === 0,
+    `no banned API in packages/engine/src (${findings.map((f) => `${f.rel}: ${f.what} — ${f.why}`).join('; ') || 'clean'})`,
+  );
+  A(Object.keys(w.srcFiles).length > 0, `scanned ${Object.keys(w.srcFiles).length} source file(s)`);
+  // The ban is only meaningful if the replacement is actually exported.
+  for (const name of ['dsin', 'dcos', 'datan2', 'rotate']) {
+    A(new RegExp(`export function ${name}\\b`).test(w.srcFiles['src/sim/dmath.ts'] ?? ''), `dmath exports ${name}`);
+  }
+
+  // -- B. Cross-engine identity ---------------------------------------------
+  H('B. Cross-engine dmath golden (the DET-5 payoff)');
+  A(w.goldenFileExists, 'packages/engine/goldens/dmath.golden.json is committed');
+  A(/^[0-9a-f]{8}$/.test(w.golden.digest ?? ''), `golden digest is a 32-bit hex value (${w.golden.digest})`);
+  A(w.digests.v8 === w.golden.digest, `V8 reproduces the golden digest (got ${w.digests.v8})`);
+  if (w.digests.jsc === null) {
+    if (log) {
+      console.log('  --   JavaScriptCore not present on this host; the browser triple covers WebKit in CI at P2c');
+    }
+  } else {
+    A(w.digests.jsc === w.golden.digest, `JavaScriptCore reproduces the golden digest (got ${w.digests.jsc})`);
+    A(
+      w.digests.jsc === w.digests.v8,
+      `V8 and JavaScriptCore agree bit-for-bit across ${w.golden.sweep?.samples ?? '?'} samples`,
+    );
+  }
+
+  // -- C. Constants ↔ 03 ----------------------------------------------------
+  H('C. Engine constants ↔ 03 prose');
+  const checkTable = (label, values, table) => {
+    const undocumented = Object.keys(values).filter((k) => !(k in table));
+    A(undocumented.length === 0, `${label}: every constant is mapped to spec prose (unmapped: ${undocumented.join(', ') || 'none'})`);
+    for (const [key, pattern] of Object.entries(table)) {
+      if (!(key in values)) { A(false, `${label}.${key} is mapped but no longer exists in the code`); continue; }
+      const re = pattern(values[key]);
+      A(re !== null && re.test(w.doc03), `${label}.${key} = ${values[key]} matches 03 (${re ?? 'value rejected'})`);
+    }
+  };
+  checkTable('SIM', w.sim, SIM_IN_SPEC);
+  checkTable('EXPAND', w.expand, EXPAND_IN_SPEC);
+
+  // -- D. Piece vocabulary --------------------------------------------------
+  H('D. Body pieces ↔ the protocol union');
+  const declared = new Set(
+    [...(w.pieceUnion.match(/export type BodyPiece =([\s\S]*?);/)?.[1] ?? '').matchAll(/'([a-z0-9]+)'/g)].map((m) => m[1]),
+  );
+  const undeclaredPieces = [...w.pieces].filter((p) => !declared.has(p));
+  const unusedPieces = [...declared].filter((p) => !w.pieces.has(p));
+  A(declared.size > 0, `protocol declares ${declared.size} named piece(s): ${[...declared].join(', ')}`);
+  A(undeclaredPieces.length === 0, `every piece geometry emits is declared (stray: ${undeclaredPieces.join(', ') || 'none'})`);
+  A(unusedPieces.length === 0, `every declared piece is emitted by some prefab (orphan: ${unusedPieces.join(', ') || 'none'})`);
+
+  // -- E. Package surface ---------------------------------------------------
+  H('E. Package surface');
+  const modules = Object.keys(w.srcFiles).filter((f) => f !== 'src/index.ts');
+  const unreachable = modules.filter((f) => {
+    const spec = f.replace(/^src\//, './').replace(/\.ts$/, '.js');
+    return !w.indexSrc.includes(spec);
+  });
+  A(unreachable.length === 0, `every src module is exported from index.ts (unreachable: ${unreachable.join(', ') || 'none'})`);
+
+  // -- F. One PRNG across packages ------------------------------------------
+  H('F. PCG32 ↔ types/procgen.ts (06 PG-2: "the same algorithm as DET-6")');
+  const vector = [...(w.procgenSrc.match(/PCG32_TEST_VECTOR = \[([\s\S]*?)\]/)?.[1] ?? '').matchAll(/0x([0-9a-f]{8})/g)]
+    .map((m) => parseInt(m[1], 16));
+  A(vector.length === 6, `parsed the published test vector from types/procgen.ts (${vector.length} values)`);
+  A(
+    vector.length === 6 && vector.every((v, i) => v === w.pcg[i]),
+    `the engine's PCG32 reproduces it (got ${w.pcg.map((v) => v.toString(16)).join(' ')})`,
+  );
+
+  return fails;
+}
+
+// ---------------------------------------------------------------------------
+// Run: positives, then a negative battery that must all bite.
+// ---------------------------------------------------------------------------
+
+const world = loadWorld();
+console.log(`verify-engine — packages/engine under ${ROOT}`);
+console.log(`  engines probed: V8 ${process.version}${world.digests.jsc === null ? '' : ' + JavaScriptCore'}`);
+const positiveFails = runChecks(world, true);
+
+const clone = (w) => ({ ...w, srcFiles: { ...w.srcFiles }, sim: { ...w.sim }, expand: { ...w.expand }, golden: { ...w.golden }, pieces: new Set(w.pieces) });
+
+const NEGATIVES = [
+  ['call Math.sin inside the simulation core', (w) => { w.srcFiles['src/sim/geometry.ts'] += '\nconst leak = Math.sin(1);\n'; }],
+  ['read the clock inside the simulation core', (w) => { w.srcFiles['src/sim/canonical.ts'] += '\nconst t = Date.now();\n'; }],
+  ['sort ids with localeCompare', (w) => { w.srcFiles['src/sim/canonical.ts'] += '\nconst c = "a".localeCompare("b");\n'; }],
+  ['change the committed cross-engine digest', (w) => { w.golden = { ...w.golden, digest: 'deadbeef' }; }],
+  ['move the spring plate without touching 03 §6', (w) => { w.expand.SPRING_PLATE_H = 0.017; }],
+  ['shorten the hard run cap without touching 03 §9.2', (w) => { w.sim.HARD_CAP_S = 300; }],
+  ['add an engine constant that no spec prose fixes', (w) => { w.sim.MYSTERY_FUDGE = 0.42; }],
+  ['rename a body piece in the geometry table', (w) => { w.pieces = new Set([...w.pieces].map((p) => (p === 'plate' ? 'pad' : p))); }],
+  ['stop exporting the geometry module from index.ts', (w) => { w.indexSrc = w.indexSrc.replace("export * from './sim/geometry.js';", ''); }],
+  ['break the PRNG that procgen shares', (w) => { w.pcg = [...w.pcg.slice(0, 5), 0]; }],
+];
+
+console.log('\nnegative battery (each mutation must be caught):');
+let bit = 0;
+for (const [name, mutate] of NEGATIVES) {
+  const w = clone(world);
+  mutate(w);
+  const f = runChecks(w, false);
+  if (f > 0) { bit++; console.log(`  ok   bites: ${name} (${f} failure(s))`); }
+  else console.log(`  FAIL silent: ${name}`);
+}
+
+console.log('\n' + '-'.repeat(40));
+console.log(`positive failures: ${positiveFails}`);
+console.log(`negative battery : ${bit}/${NEGATIVES.length} bit`);
+const green = positiveFails === 0 && bit === NEGATIVES.length;
+console.log(`verify-engine: ${green ? 'GREEN' : 'RED'}`);
+process.exitCode = green ? 0 : 1;

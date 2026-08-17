@@ -57,6 +57,8 @@ jobs:
           - workspace
           # ajv-strict scene-format corpus (schema, doc examples, 15 negatives)
           - scene
+          # DET-5 exact-ops discipline, cross-engine dmath goldens, 03 §6 tables (P2)
+          - engine
           # OpenAPI 3.1 + real PG grammar (pgsql-parser) + three-way error codes
           - backend
           # workflow structure, U9 matrix ↔ types/infra.ts, migrations, isolation

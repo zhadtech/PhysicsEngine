@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "_comment": [
+    "Emit config (D30). Mirrors packages/scene-format/tsconfig.build.json:",
+    "the shared base sets noEmit, this turns it on for `pnpm run build`, and",
+    "rootDir is the package root so anything that ships beside the code keeps",
+    "one relative path valid in both the source tree and dist."
+  ],
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": ".",
+    "declaration": true
+  }
+}
