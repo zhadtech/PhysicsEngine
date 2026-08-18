@@ -45,7 +45,7 @@ import type { BodyRecord, ExpandedScene } from './expand.js';
 import { expand, isRemoved, rebind, SimLoadError } from './expand.js';
 import { applyConveyors, applyFields, fanContains, magnetContains } from './forces.js';
 import { stateHash } from './hash.js';
-import { initPhysics, type Rapier } from './rapier.js';
+import { initPhysics, physicsBuild as describeBuild, type Rapier } from './rapier.js';
 import { Pcg32 } from './rng.js';
 import type { ExtraState, LoggedCommand, PendingEffect, SnapshotBundle } from './snapshot.js';
 
@@ -759,6 +759,35 @@ export class SimCore {
   reset(): void {
     if (this.#initial === null) throw new SimLoadError('E_INTERNAL', 'no scene loaded');
     this.restore(this.#initial);
+  }
+
+  /**
+   * §5.2 `shutdown`: free the world and the event queue.
+   *
+   * Rapier's allocations live in the WASM heap, which the JS garbage collector
+   * cannot see — a worker that loads scene after scene without this leaks a
+   * whole physics world each time. Idempotent, and the core is left in the
+   * unloaded state rather than in a half-freed one, so a later `load` works and
+   * anything else fails the same way it would before the first load.
+   */
+  dispose(): void {
+    const ex = this.#ex;
+    this.#ex = null;
+    this.#initial = null;
+    this.#scratch = null;
+    this.#events?.free();
+    this.#events = null;
+    ex?.world.free();
+  }
+
+  /**
+   * The exact physics build that loaded, for `ready` (§5.3).
+   *
+   * A method rather than an exposed namespace: 03 §1 rule 2 keeps Rapier types
+   * inside this package, and `worker.ts` needs the string, not the module.
+   */
+  physicsBuild(): string {
+    return describeBuild(this.#rapier);
   }
 
   #saveExtra(): ExtraState {

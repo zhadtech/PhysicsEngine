@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>SimCore browser golden run (03 §12)</title>
+<!--
+  The page half of the browser leg of determinism-matrix.yml.
+
+  It exists only to host a real Worker and a real SharedArrayBuffer: everything
+  it measures comes out of packages/engine, and it compares nothing itself — the
+  Node side (tools/golden-browser.mjs) owns the comparison, so both legs of the
+  matrix are judged by exactly one piece of code.
+-->
+<style>
+  body { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 1.5rem; }
+  pre { white-space: pre-wrap; }
+</style>
+<h1>SimCore browser golden run</h1>
+<p id="status">idle</p>
+<pre id="log"></pre>
+<script type="module" src="/driver.js"></script>

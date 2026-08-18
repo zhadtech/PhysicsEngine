@@ -3,15 +3,17 @@
 Deterministic simulation core: the pinned Rapier2D wrapper, Web-Worker host + SAB triple-buffer transport, dmath, the custom force and Gauss-Seidel constraint layers, analytics and snapshot/reset. The same core runs in Node for CI and replay.
 
 - **Contract:** `docs/03-SIMULATION-CORE.md` — the normative spec this package implements.
-- **Roadmap phase:** **P2** (`docs/12-ROADMAP.md` §3) — the project keystone, in progress.
+- **Roadmap phase:** **P2** (`docs/12-ROADMAP.md` §3) — the project keystone. **Complete.**
 
-## Status: P2b shipped — the engine runs headless
+## Status: P2 complete — the keystone is settled
 
-P2 is large enough to land in slices (`docs/00-PROGRESS.md` §3b). **P2a** built
-everything derivable from a scene document *without* a physics engine — which is
-where the determinism risk in our own code lives, since Rapier's WASM is
-deterministic by DET-2 and our JavaScript is not deterministic by default.
-**P2b** turns that into a world and produces the first real golden hashes.
+P2 landed in slices (`docs/00-PROGRESS.md` §3b). **P2a** built everything
+derivable from a scene document *without* a physics engine — which is where the
+determinism risk in our own code lives, since Rapier's WASM is deterministic by
+DET-2 and our JavaScript is not deterministic by default. **P2b** turned that
+into a world and produced the first real golden hashes. **P2c** put the same
+core inside a real Web Worker behind a shared-memory transport and proved the
+hashes survive the trip, in all three browser engines.
 
 | Path | What it is |
 |---|---|
@@ -27,13 +29,47 @@ deterministic by DET-2 and our JavaScript is not deterministic by default.
 | `src/sim/analytics.ts` | **§10.** Activation, the attribution forest, the report leaderboards rank on. |
 | `src/sim/snapshot.ts` | **§11.** The `ExtraState` shape — every stateful thing outside Rapier. |
 | `src/sim/step.ts` | **§4, §9.** `SimCore`: the pipeline, the lifecycle, `createSimCore()`. |
+| `src/transport.ts` | **§5.4, §5.5.** The triple-buffered `SharedArrayBuffer`, its postMessage fallback, and the reader side with the interpolation rules. |
+| `src/worker.ts` | **§5.** The Web Worker shell: the §5.1 lifecycle, the §5.2 commands, the §5.5 pacer. Written against an injected `WorkerEnv`, so the state machine is testable with a fake clock. |
 | `src/protocol.ts` | The worker contract (moved here from `types/protocol.ts` at P2). Also its own entry point: `@physics/engine/protocol`. |
 | `goldens/` | The §12 corpus, its run plan, the committed state hashes, and the cross-engine `dmath` digest. |
 
-**Still to come (P2c):** `worker.ts` speaking the §5 protocol, `transport.ts`
-with the §5.4 SAB triple buffer, and Playwright runs on the Chromium/Firefox/
-WebKit triple that must reproduce the Node hashes committed here. **P2 exits
-there.**
+`transport.ts` and `worker.ts` are the only two files in the package that know a
+browser exists (03 §1 rule 1); `verify-engine` enforces that boundary by
+scanning every other file for browser globals.
+
+## The browser leg (P2c) — what "determinism" now means empirically
+
+`tools/golden-browser.mjs` replays the same corpus, with the same run plan,
+against the same committed hashes — inside Chromium, Firefox and WebKit. Three
+choices make the result mean something:
+
+- **It hashes what came out of the transport, not the world.** The page reads
+  the published frame — the four floats per body §5.4 carries — and runs the
+  engine's §12 hash over them. A match is therefore evidence about the physics
+  *and* the buffer that carries it. The other half of that claim is pinned in
+  Node: `test/transport.test.mjs` asserts frame hash === live-body hash across
+  the corpus.
+- **It drives with `stepN`, never `play`.** `play` advances by wall clock
+  (§5.5), so the step count would be a property of the CI runner's load.
+- **Both transports run.** The corpus runs cross-origin isolated (the
+  `SharedArrayBuffer` path); a second, deliberately un-isolated origin re-runs a
+  subset over the postMessage fallback against the same goldens.
+
+The verdict is `tools/golden-compare.mjs`, shared with the Node leg — one rule
+for what agreement means, everywhere in the matrix.
+
+```bash
+pnpm run golden:browser                                   # the whole triple
+node tools/golden-browser.mjs --browser=webkit --scenes=gear-chain
+```
+
+The one transformation between the legs is a bundler (esbuild, exact-pinned):
+the shared validation gate depends on ajv, which is CommonJS, and module workers
+have no import maps. The WASM is unaffected — D7 chose the `-compat` build
+precisely so the physics bytes cannot vary with what packs the JS around them —
+and the harness asserts the `ready` message reports the same `engineVersion` and
+build string the goldens are keyed to.
 
 ## The goldens
 
@@ -98,7 +134,8 @@ pnpm run verify:engine  # the discipline lint + cross-engine goldens + 03 corres
 pnpm run golden         # the §12 corpus against the committed state hashes
 ```
 
-The definition of done for P2 is an **existing** CI gate, not a new criterion
+The definition of done for P2 was an **existing** CI gate, not a new criterion
 (`docs/12-ROADMAP.md` §5): `determinism-matrix.yml` green with **real** golden
-hashes across both ISAs and the browser triple, which is where U9/U26 close
-empirically. `verify-engine.mjs` is a check *inside* `ci.yml`, not a finish line.
+hashes across both ISAs and the browser triple. Both legs are wired and green,
+so **U9 and U26 are closed empirically**. `verify-engine.mjs` is a check *inside*
+`ci.yml`, not a finish line.

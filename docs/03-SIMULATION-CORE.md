@@ -110,7 +110,7 @@ Every command carries `seq` (u32, monotonic). The worker acks each with `{ seq, 
 | `load` | scene (structured clone) | Validation gate (schema + semantic, shared `scene-format`) → expand → step-0 snapshot → `loaded` |
 | `play` | — | Start/resume stepping |
 | `pause` | — | Halt after current step; state preserved |
-| `stepN` | `n` (1–600) | Debug: advance exactly n steps while paused |
+| `stepN` | `n` (1–600) | Debug: advance exactly n steps while not running — i.e. in `paused` **or** `ready`, which is the paused state a freshly loaded run sits in. This is also the only command that advances a run by an exact amount: `play` advances by wall clock, so any harness that needs a reproducible step count (the browser golden leg, §12) drives with this one |
 | `setSpeed` | 0.25 \| 0.5 \| 1 \| 2 \| 4 | Playback pacing only — steps per wall-second. Never changes `dt`, never changes results (DET-1) |
 | `stop` | — | Finish now: `finished(reason: "stopped", analytics)` |
 | `reset` | — | Restore step-0 snapshot bundle (§11); back to `ready` |
@@ -120,13 +120,15 @@ Every command carries `seq` (u32, monotonic). The worker acks each with `{ seq, 
 
 | Message | Payload | Notes |
 |---|---|---|
-| `ready` | `engineVersion`, Rapier package + version, `transport: "sab" \| "postmessage"` | Once at boot (worker checks `crossOriginIsolated`) |
+| `ready` | `engineVersion`, Rapier package + version, `transport: "sab" \| "postmessage"` | Once at boot (worker checks `crossOriginIsolated`). `engineVersion` is a constant compiled into the package, not a manifest read: a worker has no filesystem |
 | `loaded` | `bodyCount`, `registry: {objId, piece}[]` (index = buffer slot), `warnings: LoadWarning[]`, `sab?` (SAB transport) | **Static geometry is not sent.** The renderer derives all static placement (ramp vertices, curve tessellation, spring/piston base poses) from the scene document via the same shared `expand`-geometry module SimCore uses — one source of truth, nothing to serialize |
 | `frame` | `stepIndex`, transferable `Float32Array` | Fallback transport only; 3-buffer recycling pool, UI transfers buffers back |
-| `events` | `fromStep`, `toStep`, `SimEvent[]` | Per publish batch. Semantic events (activation, trigger, goal, removal, actuator toggle, finish-relevant) are never dropped; collision/SFX events are capped at 256 per batch, highest impulse first |
+| `events` | `fromStep`, `toStep`, `SimEvent[]` | Per publish batch, covering the **half-open** interval `[fromStep, toStep)` — an event carries the index of the step that was executing when it was observed (P6), so a batch ending at `toStep` cannot yet carry one labelled `toStep`. The batch `load` publishes is `0 → 0`: §10's step-0 activations are roots of the attribution forest and belong to no step interval. Semantic events (activation, trigger, goal, removal, actuator toggle, finish-relevant) are never dropped; collision/SFX events are capped at 256 per batch, highest impulse first |
 | `finished` | `reason`, `AnalyticsReport` | §9.2, §10 |
 | `error` | `code`, `message`, `detail?` | Codes: `E_SCHEMA`, `E_SEMANTIC`, `E_LIMITS`, `E_SCHEMA_NEWER`, `E_INTERNAL` |
 | `ack` | `seq`, `ok`, `error?` | Every command |
+
+One message travels UI → worker without being a §5.2 command: `{ type: "recycle", transforms }`, the fallback transport's buffer hand-back. It carries no `seq` and is not acked — it instructs the simulation in no way, and acking it would put a non-command in the DET-8 command log.
 
 ### 5.4 Shared-buffer layout (primary transport)
 
@@ -143,14 +145,14 @@ Float32Array body slabs: 3 slots × bodyCount × 4 floats
   per body: x, y, rot (radians), state (0 = asleep, 1 = awake, 2 = removed)
 ```
 
-Writer protocol: write slot `(c+1) % 3`, store its stepIndex in `[8 + slot]`, then `Atomics.store` the incremented `c` into `[3]`. The two most recently published slots are never written, so a reader holding `c` can always safely read slots `c % 3` and `(c−1) % 3` as a consistent interpolation pair. **Rotations are radians in the buffer** (engine-native); only the file format uses degrees.
+Writer protocol: write slot `(c+1) % 3`, store its stepIndex in `[8 + slot]`, then `Atomics.store` the incremented `c` into `[3]`. `c` starts at **−1** — "nothing published yet", the window between `loaded` and the initial frame — so a reader that attaches early gets an empty read set rather than a slot of zeros, and `c = 0` has one readable slot rather than two. The two most recently published slots are never written, so a reader holding `c` can always safely read slots `c % 3` and `(c−1) % 3` as a consistent interpolation pair. **Rotations are radians in the buffer** (engine-native); only the file format uses degrees.
 
 Body count cap: expansion may produce more bodies than objects (segmented ropes up to 64 each). Hard engine limit `MAX_DYNAMIC_BODIES = 8000`, checked at load (`E_LIMITS`). SAB size at cap ≈ 384 KB.
 
 ### 5.5 Pacing and interpolation contract
 
-- **Worker pacing:** a MessageChannel-driven loop. Per wake: `owed = clamp(floor((now − epoch) · speed / dt) − stepsDone, 0, MAX_CATCHUP = 5)` steps, then one publish. The cap turns overload into slow motion, never a death spiral. Pacing affects *when* steps happen, never *what* they compute (DET-1).
-- **Renderer interpolation (normative for M3):** maintain playhead `p` in step units; per display frame `p = clamp(p + Δt_display · 60 · speed, c_latest − 2, c_latest − 0.5)`; with `i = floor(p)`, `α = p − i`, output `lerp(state_i, state_{i+1}, α)`; angles interpolate along the shortest arc. Staying ≥ 0.5 step behind the newest slot absorbs publish jitter.
+- **Worker pacing:** a MessageChannel-driven loop. Per wake: `owed = clamp(floor((now − epoch) · speed / dt) − stepsDone, 0, MAX_CATCHUP = 5)` steps, then one publish. The cap turns overload into slow motion, never a death spiral. Pacing affects *when* steps happen, never *what* they compute (DET-1). `epoch`/`stepsDone` are re-anchored on `play` **and on `setSpeed`** — without the second, the wall time already served at the old speed would be re-served at the new one and the run would jump on every speed change.
+- **Renderer interpolation (normative for M3):** maintain playhead `p` in step units; per display frame `p = clamp(p + Δt_display · 60 · speed, c_latest − 2, c_latest − 0.5)`; with `i = floor(p)`, `α = p − i`, output `lerp(state_i, state_{i+1}, α)`; angles interpolate along the shortest arc. Staying ≥ 0.5 step behind the newest slot absorbs publish jitter. The `α = p − i` form assumes one publish per step; under catch-up the two readable slots can be several steps apart, so α is taken from the slots' **own** step indices — `(p − step_older) / (step_newer − step_older)`, saturated to `[0, 1]` — which degrades to the same number when the assumption holds. `state` (asleep/awake/removed) is not interpolable and comes from the older slot, the one the interpolated pose belongs to until α reaches 1.
 
 ---
 
@@ -365,7 +367,7 @@ Step-0 activations are roots (no edge). The edges form a forest.
 | Test | Guards against |
 |---|---|
 | Double-run identity: every corpus scene, 3600 steps, hash every 60 — two runs, same process | Internal nondeterminism (map iteration, unsorted event handling) |
-| Cross-platform golden hashes: CI matrix (linux-x64 + macos-arm64, pinned Node LTS) against committed goldens per engineVersion; browser triple (Chromium/Firefox/WebKit, Playwright) added in M9 | U9 — the enhanced-determinism promise |
+| Cross-platform golden hashes: CI matrix (linux-x64 + macos-arm64, pinned Node LTS) against committed goldens per engineVersion; browser triple (Chromium/Firefox/WebKit, Playwright) driving the same corpus through the §5 worker and hashing what comes back out of the §5.4 buffer, over both transports | U9 — the enhanced-determinism promise. Node leg wired at P2b, browser leg at P2c; both green |
 | Snapshot equivalence: run 300 → snapshot → run 300 vs. straight 600 | Snapshot/ExtraState completeness (§11) |
 | Round-trip: expand(scene) vs. expand(parse(serialize(scene))), hash-equal after 600 steps | DET-4 quantization rule |
 | Force-layer units: fan falloff/cone edges, magnet clamp at 5 cm, conveyor accel cap, gearMesh chain convergence < 1e−3 rad/s after 8 passes, pulley length error < 2·slop under 10× load | §7/§8 formulas |
@@ -414,6 +416,8 @@ Force/energy sanity: piston 5 N vs. heaviest default part (40 g ⇒ 0.4 N weight
 ---
 
 ## 15. Changelog
+
+- **2026-08-18 (Session 17, P2c — clarifications only; the browser leg is now real):** implementing §5 against three real browsers changed no behaviour and no number, and filled five silences the shell could not be written without answering. (1) **`stepN` is valid in `ready`,** not only in `paused`: `ready` *is* the paused state a loaded run sits in, and `stepN` is the only command that advances a run by an exact amount — the browser golden leg cannot use `play`, whose step count is a function of the runner's wall clock. (2) **Event batches are half-open,** `[fromStep, toStep)`, because an event carries the index of the step that was executing when it was observed; `load`'s own batch is `0 → 0`. (3) **The buffer hand-back is not a command.** §5.3 required the UI to return frame buffers but never said how; it is `{ type: "recycle", transforms }`, unacked, and deliberately outside the DET-8 command log. (4) **The write counter starts at −1,** so the window between `loaded` and the first frame reads as "nothing published" instead of as a slot of zeros. (5) **`setSpeed` re-anchors the pacing epoch,** and interpolation takes α from the readable slots' own step indices — §5.5's `α = p − i` assumes one publish per step, which catch-up breaks. Measured, not assumed: the corpus reproduces the P2b golden hashes bit-for-bit in Chromium 151, Firefox 153 and WebKit 26.5, over the shared-memory transport *and* the postMessage fallback — 30 checkpoint-sequence comparisons, zero divergence. **U9 is closed empirically.**
 
 - **2026-08-18 (Session 16, P2b — corrections and clarifications; the engine now exists):** implementing §6–§11 against the pinned build found five places where this spec was wrong or silent. All five are inside the determinism surface, and all five are amended in place: the format and the engine are pre-release, `engineVersion` is `0.1.0`, and the goldens are keyed to it (D8 mechanics).
 

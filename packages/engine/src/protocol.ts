@@ -19,6 +19,17 @@ import type { Id, Scene } from '@physics/scene-format';
 
 export const PROTOCOL_VERSION = 1 as const;
 
+/**
+ * The engine's semver — `engineVersion` in 03 §2, and the key every golden hash
+ * and every leaderboard row is scoped by (ADR-0005 rule 4, D17).
+ *
+ * Duplicated from `package.json` on purpose: the worker reports it in `ready`
+ * (§5.3) inside a browser, where reading the manifest would mean a network
+ * fetch in a module that is forbidden to touch the network. `verify-engine`
+ * part I holds the two spellings equal, so the duplication cannot drift.
+ */
+export const ENGINE_VERSION = '0.1.0';
+
 // ---------------------------------------------------------------------------
 // Engine constants (03 — single source; changing any is an engineVersion bump)
 // ---------------------------------------------------------------------------
@@ -161,6 +172,17 @@ export type StopCommand = CmdBase<'stop'>;
 export type ResetCommand = CmdBase<'reset'>;
 export type ShutdownCommand = CmdBase<'shutdown'>;
 
+/**
+ * Transport plumbing, not a §5.2 command: the UI transfers a spent frame buffer
+ * back so the fallback transport's three-buffer pool can reuse it (§5.3). It
+ * carries no `seq` and is not acked — it is not an instruction to the
+ * simulation, and acking it would put a non-command in the DET-8 command log.
+ */
+export interface RecycleFrameMsg {
+  type: 'recycle';
+  transforms: Float32Array;
+}
+
 export type SimCommand =
   | LoadCommand
   | PlayCommand
@@ -170,6 +192,9 @@ export type SimCommand =
   | StopCommand
   | ResetCommand
   | ShutdownCommand;
+
+/** Everything the worker accepts: the §5.2 commands plus the buffer hand-back. */
+export type SimInbound = SimCommand | RecycleFrameMsg;
 
 // ---------------------------------------------------------------------------
 // Events (worker → UI, batched per publish, §5.3)
