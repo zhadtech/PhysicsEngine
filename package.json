@@ -21,6 +21,8 @@
     "verify:backend": "node tools/verify-backend.mjs",
     "verify:infra": "node tools/verify-infra.mjs",
     "verify:roadmap": "node tools/verify-roadmap.mjs",
+    "golden": "turbo run build --filter=@physics/engine && node tools/golden-node.mjs",
+    "golden:update": "turbo run build --filter=@physics/engine && node tools/golden-node.mjs --update",
     "ci": "pnpm run typecheck && pnpm run verify && pnpm run test"
   },
   "devDependencies": {

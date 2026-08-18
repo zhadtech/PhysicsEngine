@@ -1,0 +1,313 @@
+{
+  "schemaVersion": 1,
+  "engineVersion": "0.1.0",
+  "world": {
+    "seed": 13,
+    "bounds": [
+      9,
+      4
+    ]
+  },
+  "objects": [
+    {
+      "id": "floor",
+      "type": "platform",
+      "pos": [
+        0,
+        -0.025
+      ],
+      "props": {
+        "w": 8
+      }
+    },
+    {
+      "id": "belt1",
+      "type": "conveyor",
+      "pos": [
+        -2,
+        0.3
+      ],
+      "props": {
+        "w": 1.5,
+        "speed": 0.4
+      }
+    },
+    {
+      "id": "belt2",
+      "type": "conveyor",
+      "pos": [
+        0.5,
+        0.3
+      ],
+      "props": {
+        "w": 1.5,
+        "speed": -0.25,
+        "active": false
+      }
+    },
+    {
+      "id": "trg1",
+      "type": "trigger",
+      "pos": [
+        -1,
+        0.4
+      ],
+      "props": {
+        "targets": [
+          "belt2",
+          "fanC",
+          "magB"
+        ],
+        "once": false
+      }
+    },
+    {
+      "id": "goalR",
+      "type": "goal",
+      "pos": [
+        3.4,
+        0.1
+      ]
+    },
+    {
+      "id": "fanA",
+      "type": "fan",
+      "pos": [
+        -2.5,
+        0.75
+      ],
+      "rot": -20,
+      "props": {
+        "range": 0.9,
+        "strength": 0.4,
+        "active": true
+      }
+    },
+    {
+      "id": "fanB",
+      "type": "fan",
+      "pos": [
+        -1.6,
+        0.75
+      ],
+      "rot": -8,
+      "props": {
+        "range": 0.9,
+        "strength": 0.4,
+        "active": false
+      }
+    },
+    {
+      "id": "fanC",
+      "type": "fan",
+      "pos": [
+        -0.7,
+        0.75
+      ],
+      "rot": 4,
+      "props": {
+        "range": 0.9,
+        "strength": 0.4,
+        "active": true
+      }
+    },
+    {
+      "id": "fanD",
+      "type": "fan",
+      "pos": [
+        0.2,
+        0.75
+      ],
+      "rot": 16,
+      "props": {
+        "range": 0.9,
+        "strength": 0.4,
+        "active": false
+      }
+    },
+    {
+      "id": "fanE",
+      "type": "fan",
+      "pos": [
+        1.1,
+        0.75
+      ],
+      "rot": 28,
+      "props": {
+        "range": 0.9,
+        "strength": 0.4,
+        "active": true
+      }
+    },
+    {
+      "id": "magA",
+      "type": "magnet",
+      "pos": [
+        -1.8,
+        1.1
+      ],
+      "props": {
+        "range": 0.7,
+        "strength": 2,
+        "active": false
+      }
+    },
+    {
+      "id": "magB",
+      "type": "magnet",
+      "pos": [
+        -0.7,
+        1.1
+      ],
+      "props": {
+        "range": 0.7,
+        "strength": 3,
+        "active": true
+      }
+    },
+    {
+      "id": "magC",
+      "type": "magnet",
+      "pos": [
+        0.4,
+        1.1
+      ],
+      "props": {
+        "range": 0.7,
+        "strength": 4,
+        "active": false
+      }
+    },
+    {
+      "id": "magD",
+      "type": "magnet",
+      "pos": [
+        1.5,
+        1.1
+      ],
+      "props": {
+        "range": 0.7,
+        "strength": 5,
+        "active": true
+      }
+    },
+    {
+      "id": "p0",
+      "type": "marble",
+      "pos": [
+        -2.6,
+        0.45
+      ],
+      "props": {
+        "magnetic": true
+      }
+    },
+    {
+      "id": "p1",
+      "type": "marble",
+      "pos": [
+        -2.38,
+        0.45
+      ],
+      "props": {
+        "magnetic": false
+      }
+    },
+    {
+      "id": "p2",
+      "type": "marble",
+      "pos": [
+        -2.16,
+        0.45
+      ],
+      "props": {
+        "magnetic": true
+      }
+    },
+    {
+      "id": "p3",
+      "type": "marble",
+      "pos": [
+        -1.94,
+        0.45
+      ],
+      "props": {
+        "magnetic": false
+      }
+    },
+    {
+      "id": "p4",
+      "type": "marble",
+      "pos": [
+        -1.72,
+        0.45
+      ],
+      "props": {
+        "magnetic": true
+      }
+    },
+    {
+      "id": "p5",
+      "type": "marble",
+      "pos": [
+        -1.5,
+        0.45
+      ],
+      "props": {
+        "magnetic": false
+      }
+    },
+    {
+      "id": "q0",
+      "type": "crate",
+      "pos": [
+        -2.4,
+        0.39
+      ],
+      "props": {
+        "w": 0.07,
+        "h": 0.07,
+        "magnetic": false
+      }
+    },
+    {
+      "id": "q1",
+      "type": "crate",
+      "pos": [
+        -1.9,
+        0.39
+      ],
+      "props": {
+        "w": 0.07,
+        "h": 0.07,
+        "magnetic": true
+      }
+    },
+    {
+      "id": "q2",
+      "type": "crate",
+      "pos": [
+        -1.4,
+        0.39
+      ],
+      "props": {
+        "w": 0.07,
+        "h": 0.07,
+        "magnetic": false
+      }
+    },
+    {
+      "id": "q3",
+      "type": "crate",
+      "pos": [
+        -0.9,
+        0.39
+      ],
+      "props": {
+        "w": 0.07,
+        "h": 0.07,
+        "magnetic": true
+      }
+    }
+  ]
+}

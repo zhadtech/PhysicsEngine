@@ -1,0 +1,263 @@
+{
+  "schemaVersion": 1,
+  "engineVersion": "0.1.0",
+  "world": {
+    "seed": 9,
+    "bounds": [
+      5,
+      3
+    ]
+  },
+  "objects": [
+    {
+      "id": "g0",
+      "type": "gear",
+      "pos": [
+        -1.4,
+        1
+      ],
+      "props": {
+        "r": 0.19,
+        "motorSpeed": 180,
+        "maxTorque": 5
+      }
+    },
+    {
+      "id": "g1",
+      "type": "gear",
+      "pos": [
+        -1,
+        1
+      ],
+      "props": {
+        "r": 0.19
+      }
+    },
+    {
+      "id": "b1",
+      "type": "marble",
+      "pos": [
+        -0.8,
+        1.24
+      ],
+      "props": {
+        "r": 0.03
+      }
+    },
+    {
+      "id": "g2",
+      "type": "gear",
+      "pos": [
+        -0.6,
+        1
+      ],
+      "props": {
+        "r": 0.19
+      }
+    },
+    {
+      "id": "b2",
+      "type": "marble",
+      "pos": [
+        -0.4,
+        1.24
+      ],
+      "props": {
+        "r": 0.03
+      }
+    },
+    {
+      "id": "g3",
+      "type": "gear",
+      "pos": [
+        -0.2,
+        1
+      ],
+      "props": {
+        "r": 0.19
+      }
+    },
+    {
+      "id": "b3",
+      "type": "marble",
+      "pos": [
+        0,
+        1.24
+      ],
+      "props": {
+        "r": 0.03
+      }
+    },
+    {
+      "id": "g4",
+      "type": "gear",
+      "pos": [
+        0.2,
+        1
+      ],
+      "props": {
+        "r": 0.19
+      }
+    },
+    {
+      "id": "b4",
+      "type": "marble",
+      "pos": [
+        0.4,
+        1.24
+      ],
+      "props": {
+        "r": 0.03
+      }
+    },
+    {
+      "id": "g5",
+      "type": "gear",
+      "pos": [
+        0.6,
+        1
+      ],
+      "props": {
+        "r": 0.19
+      }
+    },
+    {
+      "id": "b5",
+      "type": "marble",
+      "pos": [
+        0.8,
+        1.24
+      ],
+      "props": {
+        "r": 0.03
+      }
+    },
+    {
+      "id": "g6",
+      "type": "gear",
+      "pos": [
+        1,
+        1
+      ],
+      "props": {
+        "r": 0.19
+      }
+    },
+    {
+      "id": "b6",
+      "type": "marble",
+      "pos": [
+        1.2,
+        1.24
+      ],
+      "props": {
+        "r": 0.03
+      }
+    },
+    {
+      "id": "g7",
+      "type": "gear",
+      "pos": [
+        1.4,
+        1
+      ],
+      "props": {
+        "r": 0.19
+      }
+    },
+    {
+      "id": "b7",
+      "type": "marble",
+      "pos": [
+        1.6,
+        1.24
+      ],
+      "props": {
+        "r": 0.03
+      }
+    },
+    {
+      "id": "zfloor",
+      "type": "platform",
+      "pos": [
+        0,
+        -0.025
+      ],
+      "props": {
+        "w": 5
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": "mesh1",
+      "type": "gearMesh",
+      "a": {
+        "obj": "g0"
+      },
+      "b": {
+        "obj": "g1"
+      }
+    },
+    {
+      "id": "mesh2",
+      "type": "gearMesh",
+      "a": {
+        "obj": "g1"
+      },
+      "b": {
+        "obj": "g2"
+      }
+    },
+    {
+      "id": "mesh3",
+      "type": "gearMesh",
+      "a": {
+        "obj": "g2"
+      },
+      "b": {
+        "obj": "g3"
+      }
+    },
+    {
+      "id": "mesh4",
+      "type": "gearMesh",
+      "a": {
+        "obj": "g3"
+      },
+      "b": {
+        "obj": "g4"
+      }
+    },
+    {
+      "id": "mesh5",
+      "type": "gearMesh",
+      "a": {
+        "obj": "g4"
+      },
+      "b": {
+        "obj": "g5"
+      }
+    },
+    {
+      "id": "mesh6",
+      "type": "gearMesh",
+      "a": {
+        "obj": "g5"
+      },
+      "b": {
+        "obj": "g6"
+      }
+    },
+    {
+      "id": "mesh7",
+      "type": "gearMesh",
+      "a": {
+        "obj": "g6"
+      },
+      "b": {
+        "obj": "g7"
+      }
+    }
+  ]
+}

@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "engineVersion": "0.1.0",
+  "world": {
+    "seed": 7,
+    "bounds": [
+      6,
+      3
+    ]
+  },
+  "objects": [
+    {
+      "id": "floor",
+      "type": "platform",
+      "pos": [
+        0,
+        -0.025
+      ],
+      "props": {
+        "w": 6
+      }
+    },
+    {
+      "id": "gearA",
+      "type": "gear",
+      "pos": [
+        -2,
+        0.6
+      ],
+      "props": {
+        "r": 0.15,
+        "motorSpeed": 90
+      }
+    },
+    {
+      "id": "gearB",
+      "type": "gear",
+      "pos": [
+        -1.75,
+        0.6
+      ],
+      "props": {
+        "r": 0.1
+      }
+    },
+    {
+      "id": "lev",
+      "type": "lever",
+      "pos": [
+        -1,
+        0.3
+      ],
+      "props": {
+        "len": 0.6,
+        "pivot": 0.4
+      }
+    },
+    {
+      "id": "pul",
+      "type": "pulley",
+      "pos": [
+        0.5,
+        1.2
+      ]
+    },
+    {
+      "id": "box",
+      "type": "crate",
+      "pos": [
+        0.5,
+        0.04
+      ],
+      "props": {
+        "magnetic": true
+      }
+    },
+    {
+      "id": "mag",
+      "type": "magnet",
+      "pos": [
+        1.6,
+        0.5
+      ],
+      "props": {
+        "strength": -4,
+        "active": false
+      }
+    },
+    {
+      "id": "fan1",
+      "type": "fan",
+      "pos": [
+        -0.2,
+        0.1
+      ],
+      "rot": 45,
+      "props": {
+        "strength": 3,
+        "range": 1
+      }
+    },
+    {
+      "id": "tr1",
+      "type": "trigger",
+      "pos": [
+        1.2,
+        0.05
+      ],
+      "props": {
+        "targets": [
+          "pis",
+          "mag"
+        ]
+      }
+    },
+    {
+      "id": "pis",
+      "type": "piston",
+      "pos": [
+        2.2,
+        0.03
+      ],
+      "rot": -90,
+      "props": {
+        "mode": "triggered",
+        "stroke": 0.3
+      }
+    },
+    {
+      "id": "g1",
+      "type": "goal",
+      "pos": [
+        2.8,
+        0.1
+      ],
+      "props": {
+        "accepts": [
+          "box"
+        ]
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": "mesh1",
+      "type": "gearMesh",
+      "a": {
+        "obj": "gearA"
+      },
+      "b": {
+        "obj": "gearB"
+      }
+    },
+    {
+      "id": "r1",
+      "type": "rope",
+      "a": {
+        "obj": "lev",
+        "anchor": "endB"
+      },
+      "b": {
+        "obj": "box",
+        "anchor": "top"
+      },
+      "props": {
+        "via": [
+          "pul"
+        ]
+      }
+    }
+  ]
+}

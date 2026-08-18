@@ -167,7 +167,7 @@ Every open question raised across Sessions 1–11 is placed here in exactly one 
 | U | Question | Owning phase | Re-measure trigger |
 |---|---|---|---|
 | U7 | Catalog density/force defaults | P2 | analytic pass (D8) confirmed under real sim; change = schemaVersion 2 + migration |
-| U10 | Gear stage in procgen | P5 | excluded pending real-sim stability |
+| U10 | Gear stage in procgen | P5 | motor half **resolved at P2b** (03 §8.3 — the binding has no force cap, so motors are our own P4 constraints; a commanded gear holds speed under load, an over-capped one stalls). What remains is the 06 CT-2 stage-design judgement |
 | U11 | Presentation asset / art pass | P3 | materials, belt/rope meshes, SFX from `impulse` |
 | U12 | Touch interaction set | P3 | validate on real devices; adjust `EDITOR` constants only |
 | U16 | Procgen estimate-model calibration | P5 | drift > 15% ⇒ procgenVersion bump (06 §11) |

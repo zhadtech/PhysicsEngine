@@ -33,13 +33,26 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - name: headless SimCore golden hashes
-        run: echo "packages/engine golden-hash suite (03 §12) — wired when the engine package lands"
-      - name: compare against committed goldens
-        run: echo "fail on any hash != committed golden for this engineVersion"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # `pnpm run golden` builds packages/engine and replays the 03 §12 corpus,
+      # comparing every 60th-step state hash — not just the final one — against
+      # packages/engine/goldens/state.golden.json. Wired at P2b, when there was
+      # finally an engine to run. Both ISAs and both Node lines execute the same
+      # command a developer runs locally.
+      - name: headless SimCore golden hashes (03 §12)
+        run: pnpm run golden
+      # The suites the golden run cannot see: the §12 properties that hold
+      # *within* a process (double-run identity, snapshot equivalence, the DET-4
+      # round trip, command-boundary independence) and the §7/§8 force-layer
+      # units. A hash that reproduces everywhere while being wrong everywhere is
+      # exactly what these catch.
+      - name: engine unit suites (§12 properties, §7/§8 units)
+        run: pnpm run test --filter=@physics/engine
 
   # Cross-browser golden hash + the 09 §9 render/perf gate. WASM + SAB transport
   # must agree with the Node build across Chromium/Firefox/WebKit (BROWSER_TRIPLE).
@@ -55,6 +68,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      # P2c wires this leg: the same corpus and the same goldens, run through
+      # worker.ts + the SAB transport in a real browser. The Node goldens above
+      # are the numbers it must match.
       - name: install Playwright browsers
         run: echo "npx playwright install --with-deps ${{ matrix.browser }}"
       - name: browser SimCore golden hashes

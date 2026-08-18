@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "The 03 §12 corpus and its run plan — the *inputs* to the golden hashes.",
+    "Kept separate from state.golden.json (the measured outputs) on purpose: a",
+    "`--update` run rewrites the outputs, and if the run length lived there too,",
+    "shortening a run would look exactly like a hash changing. Editing this file",
+    "is a deliberate act that re-keys the goldens.",
+    "",
+    "§12 asks for 3600 steps per scene. A scene that reaches a §9.2 finish",
+    "condition first stops there, and its golden records that step — the finish",
+    "step is itself part of what determinism has to reproduce.",
+    "",
+    "Coverage: 02's two worked examples, one scene carrying every catalog type",
+    "and every link type, and the four adversarial shapes §12 names (a domino",
+    "field at the object ceiling, 64-segment ropes, a meshed gear chain, all the",
+    "field types at once) plus the pulley rope, because §8.2 is the one piece of",
+    "solver mathematics this engine implements itself."
+  ],
+  "steps": 3600,
+  "checkpointEvery": 60,
+  "scenes": [
+    { "name": "minimal-chain", "why": "02 §10.1 — marble, ramp, domino chain, goal" },
+    { "name": "mechanism-showcase", "why": "02 §10.2 — motors, lever, pulley rope, fan, magnet, trigger, piston" },
+    { "name": "catalog", "why": "every one of the 18 object types and all 5 link types" },
+    { "name": "pulley-lift", "why": "§8.2's unilateral rope constraint under a real load" },
+    { "name": "gear-chain", "why": "§8.1 convergence across a chain of meshes" },
+    { "name": "all-fields", "why": "§7 fans, magnets and belts together, with trigger toggles" },
+    { "name": "ropes-64", "why": "the 64-segment rope cap (02 §6.2)" },
+    { "name": "dominoes-4800", "why": "the object ceiling — 4 830 bodies, mostly dormant (D20)" }
+  ]
+}
