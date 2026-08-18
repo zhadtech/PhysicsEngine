@@ -1,0 +1,178 @@
+{
+  "schemaVersion": 1,
+  "engineVersion": "0.1.0",
+  "world": {
+    "seed": 5,
+    "bounds": [
+      7,
+      5
+    ]
+  },
+  "objects": [
+    {
+      "id": "floor",
+      "type": "platform",
+      "pos": [
+        0,
+        -0.025
+      ],
+      "props": {
+        "w": 6
+      }
+    },
+    {
+      "id": "anc0",
+      "type": "platform",
+      "pos": [
+        -1.5,
+        2.2
+      ],
+      "props": {
+        "w": 0.2
+      }
+    },
+    {
+      "id": "load0",
+      "type": "crate",
+      "pos": [
+        -1.5,
+        1.2
+      ],
+      "props": {
+        "w": 0.08,
+        "h": 0.08
+      }
+    },
+    {
+      "id": "anc1",
+      "type": "platform",
+      "pos": [
+        -0.5,
+        2.2
+      ],
+      "props": {
+        "w": 0.2
+      }
+    },
+    {
+      "id": "load1",
+      "type": "crate",
+      "pos": [
+        -0.5,
+        1.2
+      ],
+      "props": {
+        "w": 0.08,
+        "h": 0.08
+      }
+    },
+    {
+      "id": "anc2",
+      "type": "platform",
+      "pos": [
+        0.5,
+        2.2
+      ],
+      "props": {
+        "w": 0.2
+      }
+    },
+    {
+      "id": "load2",
+      "type": "crate",
+      "pos": [
+        0.5,
+        1.2
+      ],
+      "props": {
+        "w": 0.08,
+        "h": 0.08
+      }
+    },
+    {
+      "id": "anc3",
+      "type": "platform",
+      "pos": [
+        1.5,
+        2.2
+      ],
+      "props": {
+        "w": 0.2
+      }
+    },
+    {
+      "id": "load3",
+      "type": "crate",
+      "pos": [
+        1.5,
+        1.2
+      ],
+      "props": {
+        "w": 0.08,
+        "h": 0.08
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": "rope0",
+      "type": "rope",
+      "a": {
+        "obj": "anc0",
+        "anchor": "bottom"
+      },
+      "b": {
+        "obj": "load0",
+        "anchor": "top"
+      },
+      "props": {
+        "segments": 64
+      }
+    },
+    {
+      "id": "rope1",
+      "type": "rope",
+      "a": {
+        "obj": "anc1",
+        "anchor": "bottom"
+      },
+      "b": {
+        "obj": "load1",
+        "anchor": "top"
+      },
+      "props": {
+        "segments": 64
+      }
+    },
+    {
+      "id": "rope2",
+      "type": "rope",
+      "a": {
+        "obj": "anc2",
+        "anchor": "bottom"
+      },
+      "b": {
+        "obj": "load2",
+        "anchor": "top"
+      },
+      "props": {
+        "segments": 64
+      }
+    },
+    {
+      "id": "rope3",
+      "type": "rope",
+      "a": {
+        "obj": "anc3",
+        "anchor": "bottom"
+      },
+      "b": {
+        "obj": "load3",
+        "anchor": "top"
+      },
+      "props": {
+        "segments": 64
+      }
+    }
+  ]
+}

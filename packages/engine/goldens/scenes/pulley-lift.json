@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "engineVersion": "0.1.0",
+  "world": {
+    "seed": 17,
+    "bounds": [
+      5,
+      4
+    ]
+  },
+  "objects": [
+    {
+      "id": "floor",
+      "type": "platform",
+      "pos": [
+        0,
+        -0.025
+      ],
+      "props": {
+        "w": 5
+      }
+    },
+    {
+      "id": "pulA",
+      "type": "pulley",
+      "pos": [
+        -0.6,
+        1.8
+      ]
+    },
+    {
+      "id": "pulB",
+      "type": "pulley",
+      "pos": [
+        0.6,
+        1.8
+      ]
+    },
+    {
+      "id": "heavy",
+      "type": "crate",
+      "pos": [
+        -0.6,
+        1.3
+      ],
+      "props": {
+        "w": 0.14,
+        "h": 0.14,
+        "density": 40
+      }
+    },
+    {
+      "id": "light",
+      "type": "crate",
+      "pos": [
+        0.6,
+        0.07
+      ],
+      "props": {
+        "w": 0.1,
+        "h": 0.1
+      }
+    },
+    {
+      "id": "stand",
+      "type": "platform",
+      "pos": [
+        1.6,
+        0.9
+      ],
+      "props": {
+        "w": 0.4
+      }
+    },
+    {
+      "id": "swing",
+      "type": "pendulum",
+      "pos": [
+        1.6,
+        1.6
+      ],
+      "rot": 55,
+      "props": {
+        "arm": "rod",
+        "len": 0.5,
+        "bobR": 0.05
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": "lift",
+      "type": "rope",
+      "a": {
+        "obj": "heavy",
+        "anchor": "top"
+      },
+      "b": {
+        "obj": "light",
+        "anchor": "top"
+      },
+      "props": {
+        "via": [
+          "pulA",
+          "pulB"
+        ]
+      }
+    }
+  ]
+}

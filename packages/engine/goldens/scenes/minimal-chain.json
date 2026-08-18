@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "engineVersion": "0.1.0",
+  "world": {
+    "seed": 42
+  },
+  "objects": [
+    {
+      "id": "floor",
+      "type": "platform",
+      "pos": [
+        0,
+        -0.025
+      ],
+      "props": {
+        "w": 3
+      }
+    },
+    {
+      "id": "rmp",
+      "type": "ramp",
+      "pos": [
+        -1.1,
+        0.15
+      ],
+      "props": {
+        "w": 0.6,
+        "h": 0.3
+      }
+    },
+    {
+      "id": "m1",
+      "type": "marble",
+      "pos": [
+        -1.35,
+        0.34
+      ]
+    },
+    {
+      "id": "d1",
+      "type": "domino",
+      "pos": [
+        -0.6,
+        0
+      ]
+    },
+    {
+      "id": "d2",
+      "type": "domino",
+      "pos": [
+        -0.54,
+        0
+      ]
+    },
+    {
+      "id": "d3",
+      "type": "domino",
+      "pos": [
+        -0.48,
+        0
+      ]
+    },
+    {
+      "id": "d4",
+      "type": "domino",
+      "pos": [
+        -0.42,
+        0
+      ]
+    },
+    {
+      "id": "g1",
+      "type": "goal",
+      "pos": [
+        -0.2,
+        0.05
+      ],
+      "props": {
+        "accepts": [
+          "d4"
+        ]
+      }
+    }
+  ]
+}

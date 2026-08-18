@@ -18,6 +18,15 @@
 //      somewhere in the spec, and the two drift silently.
 //   D. **Vocabulary closure.** The pieces geometry emits must be the pieces the
 //      protocol declares, or the renderer indexes a body slot that is not there.
+//   G. **Golden integrity** (P2b). The corpus on disk, the run plan and the
+//      committed hashes have to describe the same eight scenes, every one of
+//      them has to pass the *shared* validation gate, and the whole lot has to
+//      be keyed to the physics build that is actually installed. A golden the
+//      matrix compares against a scene nobody runs is worse than no golden.
+//   H. **The U10 assumption** (P2b). `gear.maxTorque` and `piston.force` are
+//      enforced by our own P4 solver because rapier.js exposes no motor force
+//      cap. That is a fact about a pinned dependency, and pinned dependencies
+//      get bumped — so it is asserted rather than remembered.
 //
 // This does NOT introduce a phase exit criterion: P2's definition of done is
 // still `determinism-matrix.yml` green with real golden hashes (12-ROADMAP §5).
@@ -42,6 +51,14 @@ const engine = await import(new URL(`file://${DIST}`).href);
 // The catalog itself belongs to the format package — the engine must expand
 // exactly the types the format defines, not a list of its own.
 const format = await import(new URL(`file://${repoPath('packages/scene-format/dist/src/index.js')}`).href);
+
+/**
+ * The pinned build's joint typings. Read as text rather than probed at runtime:
+ * the question is what the *binding* offers, and a `.d.ts` answers it without
+ * instantiating a world.
+ */
+const RAPIER_JOINT_DTS =
+  'packages/engine/node_modules/@dimforge/rapier2d-deterministic-compat/dynamics/impulse_joint.d.ts';
 
 /** macOS ships the JavaScriptCore shell; Linux CI does not. Absence is not a failure. */
 const JSC = '/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc';
@@ -233,8 +250,35 @@ function loadWorld() {
   for (const abs of walk(srcDir)) srcFiles[abs.slice(repoPath('packages/engine').length + 1)] = readRepo(abs.slice(ROOT.length + 1));
 
   const rng = new engine.Pcg32(42, 54);
+
+  // The corpus, the run plan and the committed hashes, plus whether each scene
+  // survives the shared gate. Running the gate here — not a private copy of the
+  // rules — is the point: a corpus scene the server would reject is not a
+  // corpus scene.
+  const corpus = readRepoJson('packages/engine/goldens/corpus.json');
+  const sceneDir = repoPath('packages/engine/goldens/scenes');
+  const sceneFiles = readdirSync(sceneDir)
+    .filter((f) => f.endsWith('.json'))
+    .map((f) => f.slice(0, -5))
+    .sort();
+  const gate = {};
+  for (const name of sceneFiles) {
+    const text = readRepo(`packages/engine/goldens/scenes/${name}.json`);
+    const result = format.validateScene(JSON.parse(text), { bytes: Buffer.byteLength(text) });
+    gate[name] = result.ok ? 'ok' : result.code;
+  }
+
+  const enginePkg = readRepoJson('packages/engine/package.json');
   return {
     srcFiles,
+    corpus,
+    sceneFiles,
+    gate,
+    goldenState: readRepoJson('packages/engine/goldens/state.golden.json'),
+    enginePkg,
+    pinnedBuild: `${engine.PHYSICS_PACKAGE}@${enginePkg.dependencies[engine.PHYSICS_PACKAGE]}`,
+    infraSrc: readRepo('types/infra.ts'),
+    jointDts: readRepo(RAPIER_JOINT_DTS),
     doc03: readRepo('docs/03-SIMULATION-CORE.md'),
     procgenSrc: readRepo('types/procgen.ts'),
     golden: readRepoJson('packages/engine/goldens/dmath.golden.json'),
@@ -328,6 +372,57 @@ function runChecks(w, log) {
   });
   A(unreachable.length === 0, `every src module is exported from index.ts (unreachable: ${unreachable.join(', ') || 'none'})`);
 
+  // -- G. Golden corpus integrity (P2b) --------------------------------------
+  H('G. Golden corpus (03 §12)');
+  const planned = w.corpus.scenes.map((e) => e.name).sort();
+  const goldened = Object.keys(w.goldenState.scenes ?? {}).sort();
+  A(planned.length > 0, `the run plan names ${planned.length} scene(s)`);
+  A(
+    JSON.stringify(planned) === JSON.stringify(w.sceneFiles),
+    `every planned scene exists on disk and vice versa (plan ${planned.join(', ')} / disk ${w.sceneFiles.join(', ')})`,
+  );
+  A(
+    JSON.stringify(planned) === JSON.stringify(goldened),
+    `every planned scene has a committed golden (goldens: ${goldened.join(', ')})`,
+  );
+  for (const name of w.sceneFiles) {
+    A(w.gate[name] === 'ok', `${name} passes the shared validation gate (${w.gate[name]})`);
+  }
+  A(
+    w.goldenState.steps === w.corpus.steps && w.goldenState.checkpointEvery === w.corpus.checkpointEvery,
+    `the goldens were taken under the committed run plan (${w.goldenState.steps} steps, every ${w.goldenState.checkpointEvery})`,
+  );
+  A(
+    w.goldenState.key?.engineVersion === w.enginePkg.version,
+    `goldens are keyed to this engineVersion (${w.goldenState.key?.engineVersion} vs package ${w.enginePkg.version})`,
+  );
+  // The three-way pin, in the same spirit as D23's matrix pin: the version the
+  // goldens were taken under, the version the lockfile installs, and the
+  // ENGINE_BUILD constant the rest of the system keys caches and reports by.
+  A(
+    w.goldenState.key?.physicsBuild === w.pinnedBuild,
+    `goldens are keyed to the installed physics build (${w.goldenState.key?.physicsBuild} vs ${w.pinnedBuild})`,
+  );
+  A(
+    w.infraSrc.includes(`ENGINE_BUILD = '${w.pinnedBuild}'`),
+    `types/infra.ts ENGINE_BUILD names the same build (${w.pinnedBuild})`,
+  );
+  A(
+    !/[\^~]/.test(w.enginePkg.dependencies[engine.PHYSICS_PACKAGE] ?? '^'),
+    `the physics build is exact-pinned, no range (D7: "${w.enginePkg.dependencies[engine.PHYSICS_PACKAGE]}")`,
+  );
+
+  // -- H. The U10 assumption (P2b) -------------------------------------------
+  H('H. Motor force caps are still ours to enforce (U10)');
+  const jointCode = stripNonCode(w.jointDts);
+  const motorApi = [...jointCode.matchAll(/\bconfigureMotor[A-Za-z]*\b/g)].map((m) => m[0]);
+  A(motorApi.length > 0, `the binding exposes a motor API (${[...new Set(motorApi)].join(', ')})`);
+  A(
+    !/maxForce|max_force|MaxForce|maxImpulse/.test(jointCode),
+    'rapier.js still has no motor force cap, so 03 §14\'s fallback is still required ' +
+      '(if this fails, the pinned build gained one: revisit U10 and constraints.ts)',
+  );
+
   // -- F. One PRNG across packages ------------------------------------------
   H('F. PCG32 ↔ types/procgen.ts (06 PG-2: "the same algorithm as DET-6")');
   const vector = [...(w.procgenSrc.match(/PCG32_TEST_VECTOR = \[([\s\S]*?)\]/)?.[1] ?? '').matchAll(/0x([0-9a-f]{8})/g)]
@@ -350,7 +445,19 @@ console.log(`verify-engine — packages/engine under ${ROOT}`);
 console.log(`  engines probed: V8 ${process.version}${world.digests.jsc === null ? '' : ' + JavaScriptCore'}`);
 const positiveFails = runChecks(world, true);
 
-const clone = (w) => ({ ...w, srcFiles: { ...w.srcFiles }, sim: { ...w.sim }, expand: { ...w.expand }, golden: { ...w.golden }, pieces: new Set(w.pieces) });
+const clone = (w) => ({
+  ...w,
+  srcFiles: { ...w.srcFiles },
+  sim: { ...w.sim },
+  expand: { ...w.expand },
+  golden: { ...w.golden },
+  pieces: new Set(w.pieces),
+  corpus: { ...w.corpus, scenes: [...w.corpus.scenes] },
+  sceneFiles: [...w.sceneFiles],
+  gate: { ...w.gate },
+  goldenState: { ...w.goldenState },
+  enginePkg: { ...w.enginePkg },
+});
 
 const NEGATIVES = [
   ['call Math.sin inside the simulation core', (w) => { w.srcFiles['src/sim/geometry.ts'] += '\nconst leak = Math.sin(1);\n'; }],
@@ -363,6 +470,13 @@ const NEGATIVES = [
   ['rename a body piece in the geometry table', (w) => { w.pieces = new Set([...w.pieces].map((p) => (p === 'plate' ? 'pad' : p))); }],
   ['stop exporting the geometry module from index.ts', (w) => { w.indexSrc = w.indexSrc.replace("export * from './sim/geometry.js';", ''); }],
   ['break the PRNG that procgen shares', (w) => { w.pcg = [...w.pcg.slice(0, 5), 0]; }],
+  ['add a corpus scene with no committed golden', (w) => { w.sceneFiles = [...w.sceneFiles, 'zz-new'].sort(); w.gate = { ...w.gate, 'zz-new': 'ok' }; }],
+  ['commit a corpus scene the shared validation gate rejects', (w) => { w.gate = { ...w.gate, catalog: 'E_SEMANTIC' }; }],
+  ['upgrade the physics build without re-taking the goldens', (w) => { w.pinnedBuild = '@dimforge/rapier2d-deterministic-compat@0.20.0'; }],
+  ['loosen the exact pin to a caret range', (w) => { w.enginePkg = { ...w.enginePkg, dependencies: { ...w.enginePkg.dependencies, '@dimforge/rapier2d-deterministic-compat': '^0.19.3' } }; w.pinnedBuild = '@dimforge/rapier2d-deterministic-compat@^0.19.3'; }],
+  ['bump engineVersion while leaving the goldens keyed to the old one', (w) => { w.enginePkg = { ...w.enginePkg, version: '0.2.0' }; }],
+  ['shorten the golden run without re-taking the hashes', (w) => { w.corpus = { ...w.corpus, steps: 600 }; }],
+  ['let a Rapier upgrade quietly add a motor force cap', (w) => { w.jointDts += '\n  setMotorMaxForce(maxForce: number): void;\n'; }],
 ];
 
 console.log('\nnegative battery (each mutation must be caught):');

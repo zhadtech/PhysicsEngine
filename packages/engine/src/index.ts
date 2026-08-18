@@ -42,6 +42,20 @@ export * from './sim/hash.js';
 export * from './sim/canonical.js';
 /** Prefab geometry and anchors (§6, 02 §6.3). */
 export * from './sim/geometry.js';
+/** The pinned physics build (§2, D7) — values only; Rapier's types stay inside. */
+export { initPhysics, PHYSICS_PACKAGE, PHYSICS_VERSION, physicsBuild } from './sim/rapier.js';
+/** Prefab expansion into the Rapier world (§6). */
+export * from './sim/expand.js';
+/** Field and surface forces (§7). */
+export * from './sim/forces.js';
+/** Custom velocity constraints and capped motors (§8, U10). */
+export * from './sim/constraints.js';
+/** Analytics accumulators and the §10 report. */
+export * from './sim/analytics.js';
+/** Snapshot/reset state shapes (§11). */
+export * from './sim/snapshot.js';
+/** The step pipeline and run lifecycle (§4, §9) — `createSimCore()` starts here. */
+export * from './sim/step.js';
 
 export const PACKAGE = {
   name: '@physics/engine',

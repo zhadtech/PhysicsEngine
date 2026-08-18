@@ -35,6 +35,9 @@ importers:
 
   packages/engine:
     dependencies:
+      '@dimforge/rapier2d-deterministic-compat':
+        specifier: 0.19.3
+        version: 0.19.3
       '@physics/scene-format':
         specifier: workspace:*
         version: link:../scene-format
@@ -50,6 +53,9 @@ importers:
   packages/shared: {}
 
 packages:
+
+  '@dimforge/rapier2d-deterministic-compat@0.19.3':
+    resolution: {integrity: sha512-1NEi9rcsscmG5cv5SmC+bR0CrPK55zW5zvCUWXv7U4TBPA3Iv7lAR+IrbZhQU8AqipPW+8J47zb+BxX+owdvWA==}
 
   '@pgsql/types@16.1.1':
     resolution: {integrity: sha512-7ZAYUEs7hkNURh+ZnRYI/XtJzqtsXdOHQ7O7Gm/VXfnPrOzwi1/apyCMPmfqLqoT+B3r526440rUyz7bxWzVrA==}
@@ -144,6 +150,8 @@ packages:
     hasBin: true
 
 snapshots:
+
+  '@dimforge/rapier2d-deterministic-compat@0.19.3': {}
 
   '@pgsql/types@16.1.1': {}
 

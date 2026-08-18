@@ -1,0 +1,436 @@
+{
+  "schemaVersion": 1,
+  "engineVersion": "0.1.0",
+  "world": {
+    "seed": 11,
+    "bounds": [
+      9,
+      5
+    ]
+  },
+  "objects": [
+    {
+      "id": "floor",
+      "type": "platform",
+      "pos": [
+        0,
+        -0.025
+      ],
+      "props": {
+        "w": 9
+      }
+    },
+    {
+      "id": "rmp",
+      "type": "ramp",
+      "pos": [
+        -3.6,
+        0.15
+      ],
+      "props": {
+        "w": 0.6,
+        "h": 0.3
+      }
+    },
+    {
+      "id": "crv",
+      "type": "curve",
+      "pos": [
+        -2.6,
+        0.8
+      ],
+      "props": {
+        "r": 0.4,
+        "sweep": 120
+      }
+    },
+    {
+      "id": "mrb",
+      "type": "marble",
+      "pos": [
+        -3.85,
+        0.34
+      ]
+    },
+    {
+      "id": "dom1",
+      "type": "domino",
+      "pos": [
+        -2,
+        0
+      ]
+    },
+    {
+      "id": "dom2",
+      "type": "domino",
+      "pos": [
+        -1.94,
+        0
+      ]
+    },
+    {
+      "id": "crt",
+      "type": "crate",
+      "pos": [
+        -1.4,
+        0.04
+      ]
+    },
+    {
+      "id": "crt2",
+      "type": "crate",
+      "pos": [
+        -1.3,
+        0.2
+      ],
+      "props": {
+        "magnetic": true
+      }
+    },
+    {
+      "id": "plk",
+      "type": "plank",
+      "pos": [
+        -0.7,
+        0.6
+      ]
+    },
+    {
+      "id": "gearA",
+      "type": "gear",
+      "pos": [
+        0,
+        1
+      ],
+      "props": {
+        "r": 0.2,
+        "motorSpeed": 60
+      }
+    },
+    {
+      "id": "gearB",
+      "type": "gear",
+      "pos": [
+        0.31,
+        1
+      ],
+      "props": {
+        "r": 0.1
+      }
+    },
+    {
+      "id": "lev",
+      "type": "lever",
+      "pos": [
+        0.9,
+        0.5
+      ],
+      "props": {
+        "len": 0.6,
+        "pivot": 0.4,
+        "minAngle": -35,
+        "maxAngle": 35
+      }
+    },
+    {
+      "id": "spr",
+      "type": "spring",
+      "pos": [
+        1.7,
+        0
+      ],
+      "props": {
+        "mode": "passive"
+      }
+    },
+    {
+      "id": "sprM",
+      "type": "marble",
+      "pos": [
+        1.7,
+        0.16
+      ]
+    },
+    {
+      "id": "penR",
+      "type": "pendulum",
+      "pos": [
+        2.3,
+        1.2
+      ],
+      "rot": 40,
+      "props": {
+        "arm": "rod",
+        "len": 0.35
+      }
+    },
+    {
+      "id": "penP",
+      "type": "pendulum",
+      "pos": [
+        3,
+        1.2
+      ],
+      "rot": -30,
+      "props": {
+        "arm": "rope",
+        "len": 0.35
+      }
+    },
+    {
+      "id": "pis",
+      "type": "piston",
+      "pos": [
+        3.6,
+        0.03
+      ],
+      "props": {
+        "mode": "cycle",
+        "stroke": 0.12,
+        "period": 2
+      }
+    },
+    {
+      "id": "cnv",
+      "type": "conveyor",
+      "pos": [
+        -2.9,
+        1.4
+      ],
+      "props": {
+        "w": 0.8,
+        "speed": 0.3
+      }
+    },
+    {
+      "id": "cnvC",
+      "type": "crate",
+      "pos": [
+        -3.2,
+        1.48
+      ]
+    },
+    {
+      "id": "pul",
+      "type": "pulley",
+      "pos": [
+        1.2,
+        1.8
+      ]
+    },
+    {
+      "id": "wgt",
+      "type": "crate",
+      "pos": [
+        0.8,
+        1.4
+      ],
+      "props": {
+        "w": 0.12,
+        "h": 0.12,
+        "density": 30
+      }
+    },
+    {
+      "id": "lift",
+      "type": "crate",
+      "pos": [
+        1.6,
+        0.9
+      ],
+      "props": {
+        "w": 0.06,
+        "h": 0.06
+      }
+    },
+    {
+      "id": "fan1",
+      "type": "fan",
+      "pos": [
+        -0.4,
+        0.3
+      ],
+      "rot": 20,
+      "props": {
+        "range": 0.8
+      }
+    },
+    {
+      "id": "mag1",
+      "type": "magnet",
+      "pos": [
+        -1.1,
+        0.35
+      ],
+      "props": {
+        "range": 0.5,
+        "active": false
+      }
+    },
+    {
+      "id": "trg",
+      "type": "trigger",
+      "pos": [
+        2.9,
+        0.05
+      ],
+      "props": {
+        "targets": [
+          "mag1",
+          "cnv"
+        ]
+      }
+    },
+    {
+      "id": "gol",
+      "type": "goal",
+      "pos": [
+        4.2,
+        0.1
+      ],
+      "props": {
+        "accepts": "any"
+      }
+    },
+    {
+      "id": "anchor",
+      "type": "platform",
+      "pos": [
+        -0.7,
+        1.4
+      ],
+      "props": {
+        "w": 0.3
+      }
+    },
+    {
+      "id": "wA",
+      "type": "crate",
+      "pos": [
+        4.4,
+        0.6
+      ],
+      "props": {
+        "w": 0.08,
+        "h": 0.08
+      }
+    },
+    {
+      "id": "wB",
+      "type": "crate",
+      "pos": [
+        4.48,
+        0.6
+      ],
+      "props": {
+        "w": 0.08,
+        "h": 0.08
+      }
+    },
+    {
+      "id": "axP",
+      "type": "plank",
+      "pos": [
+        -2.2,
+        2
+      ],
+      "props": {
+        "w": 0.3,
+        "h": 0.02
+      }
+    },
+    {
+      "id": "axG",
+      "type": "gear",
+      "pos": [
+        -2.2,
+        2
+      ],
+      "props": {
+        "r": 0.08,
+        "motorSpeed": 45
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": "l1mesh",
+      "type": "gearMesh",
+      "a": {
+        "obj": "gearA"
+      },
+      "b": {
+        "obj": "gearB"
+      }
+    },
+    {
+      "id": "l2rope",
+      "type": "rope",
+      "a": {
+        "obj": "wgt",
+        "anchor": "top"
+      },
+      "b": {
+        "obj": "lift",
+        "anchor": "top"
+      },
+      "props": {
+        "via": [
+          "pul"
+        ]
+      }
+    },
+    {
+      "id": "l3sprL",
+      "type": "springLink",
+      "a": {
+        "obj": "anchor",
+        "anchor": "bottom"
+      },
+      "b": {
+        "obj": "plk",
+        "anchor": "top"
+      },
+      "props": {
+        "stiffness": 50
+      }
+    },
+    {
+      "id": "l4weld",
+      "type": "weld",
+      "a": {
+        "obj": "wA",
+        "anchor": "right"
+      },
+      "b": {
+        "obj": "wB",
+        "anchor": "left"
+      }
+    },
+    {
+      "id": "l5axle",
+      "type": "axle",
+      "a": {
+        "obj": "axG"
+      },
+      "b": {
+        "obj": "axP"
+      }
+    },
+    {
+      "id": "l6seg",
+      "type": "rope",
+      "a": {
+        "obj": "crv",
+        "anchor": "endB"
+      },
+      "b": {
+        "obj": "crt2",
+        "anchor": "top"
+      },
+      "props": {
+        "segments": 6
+      }
+    }
+  ]
+}
