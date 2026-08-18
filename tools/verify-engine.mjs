@@ -27,6 +27,14 @@
 //      enforced by our own P4 solver because rapier.js exposes no motor force
 //      cap. That is a fact about a pinned dependency, and pinned dependencies
 //      get bumped — so it is asserted rather than remembered.
+//   I. **The browser leg** (P2c). The §5.4 buffer layout is a wire format shared
+//      by two threads and pinned by prose, so it gets the same constants-↔-spec
+//      treatment as §6's dimensions. And the leg itself has to stay wired:
+//      `determinism-matrix.yml` shipped for two phases with `echo` where its
+//      golden runs belong (U26), which is precisely the failure mode a green
+//      build cannot show you. The harness must also keep driving the browser by
+//      `stepN` — driving by `play` would make the number of steps a property of
+//      the CI runner's load rather than of the run plan.
 //
 // This does NOT introduce a phase exit criterion: P2's definition of done is
 // still `determinism-matrix.yml` green with real golden hashes (12-ROADMAP §5).
@@ -190,6 +198,34 @@ const SIM_IN_SPEC = {
   MAX_SFX_EVENTS_PER_BATCH: (v) => new RegExp(`capped at ${numRe(v)} per batch`),
 };
 
+/**
+ * The §5.4 shared-buffer layout. This one is a *wire format*: the worker writes
+ * it and the renderer reads it, in two threads that were compiled at different
+ * times in the future (a cached page against a new worker). Every number below
+ * is therefore prose first and code second.
+ */
+const SAB_IN_SPEC = {
+  MAGIC: (v) => (String.fromCharCode((v >>> 24) & 0xff, (v >>> 16) & 0xff, (v >>> 8) & 0xff, v & 0xff) === 'SIM1' ? /MAGIC "SIM1"/ : null),
+  LAYOUT_VERSION: (v) => new RegExp(`layoutVersion = ${numRe(v)}`),
+  HEADER_WORDS: (v) => new RegExp(`Int32Array header \\(${numRe(v)} words`),
+  SLOTS: (v) => new RegExp(`${numRe(v)} slots × bodyCount`),
+  FLOATS_PER_BODY: (v) => new RegExp(`bodyCount × ${numRe(v)} floats`),
+};
+
+/**
+ * Header word ↔ the label 03 §5.4's diagram gives it. Moving a word without
+ * moving the prose is how one thread starts reading another's field.
+ */
+const SAB_HEADER_LABELS = {
+  Magic: 'MAGIC',
+  LayoutVersion: 'layoutVersion',
+  BodyCount: 'bodyCount',
+  WriteCounter: 'writeCounter',
+  LatestStepIndex: 'latestStepIndex',
+  SimStatus: 'simStatus',
+  Flags: 'flags',
+};
+
 /** The §6 expansion table's fixed dimensions. Same construction. */
 const EXPAND_IN_SPEC = {
   DOMINO_W_OVER_H: (v) => (v === 1 / 5 ? /\(h\/5\) × h/ : null),
@@ -287,7 +323,12 @@ function loadWorld() {
       jsc: existsSync(JSC) ? runDigest(JSC, ['-m', 'tools/dmath-digest.mjs']) : null,
     },
     sim: { ...engine.SIM },
+    sab: { ...engine.SAB },
     expand: { ...engine.EXPAND },
+    engineVersionConst: engine.ENGINE_VERSION,
+    matrixYml: readRepo('.github/workflows/determinism-matrix.yml'),
+    driverSrc: readRepo('tools/browser/driver.js'),
+    rootPkg: readRepoJson('package.json'),
     pieces: producedPieces(),
     pieceUnion: srcFiles['src/protocol.ts'] ?? '',
     indexSrc: srcFiles['src/index.ts'] ?? '',
@@ -350,6 +391,7 @@ function runChecks(w, log) {
     }
   };
   checkTable('SIM', w.sim, SIM_IN_SPEC);
+  checkTable('SAB', w.sab, SAB_IN_SPEC);
   checkTable('EXPAND', w.expand, EXPAND_IN_SPEC);
 
   // -- D. Piece vocabulary --------------------------------------------------
@@ -423,6 +465,56 @@ function runChecks(w, log) {
       '(if this fails, the pinned build gained one: revisit U10 and constraints.ts)',
   );
 
+  // -- I. The browser leg (P2c) ----------------------------------------------
+  H('I. The browser leg of the matrix (P2c)');
+  // The §5.4 header, word by word, against the diagram in the spec.
+  const enumBlock = (w.pieceUnion.match(/export const enum SabHeader \{([\s\S]*?)\n\}/) ?? [])[1] ?? '';
+  const headerWords = Object.fromEntries(
+    [...enumBlock.matchAll(/(\w+) = (\d+)/g)].map((m) => [m[1], Number(m[2])]),
+  );
+  const specWords = Object.fromEntries(
+    [...w.doc03.matchAll(/\[(\d+)\] ([A-Za-z]+)/g)].map((m) => [m[2], Number(m[1])]),
+  );
+  A(Object.keys(headerWords).length >= 7, `parsed the SabHeader enum (${Object.keys(headerWords).length} words)`);
+  for (const [name, label] of Object.entries(SAB_HEADER_LABELS)) {
+    A(
+      headerWords[name] !== undefined && headerWords[name] === specWords[label],
+      `SabHeader.${name} = ${headerWords[name]} is word [${specWords[label]}] "${label}" in 03 §5.4`,
+    );
+  }
+  // The engine's own version, in the three places it is spelled.
+  A(
+    w.engineVersionConst === w.enginePkg.version,
+    `ENGINE_VERSION (${w.engineVersionConst}) matches package.json (${w.enginePkg.version}) — the worker reports it in \`ready\``,
+  );
+  A(
+    w.goldenState.key?.engineVersion === w.engineVersionConst,
+    `the goldens are keyed to that same version (${w.goldenState.key?.engineVersion})`,
+  );
+  // 03 §1's package shape: exactly two files may know about the browser.
+  for (const shell of SHELL_FILES) {
+    A(shell in w.srcFiles, `${shell} exists (03 §1 names it as part of the package shape)`);
+    A(new RegExp(`${shell.replace('src/', '')}`).test(w.doc03), `03 §1's tree still lists ${shell.replace('src/', '')}`);
+  }
+  // U26: the matrix legs must run something, and `echo` is not something.
+  A(/run: pnpm run golden$/m.test(w.matrixYml), 'determinism-matrix runs the Node golden (node-golden)');
+  A(/run: pnpm run golden:browser/.test(w.matrixYml), 'determinism-matrix runs the browser golden (browser-golden)');
+  A(
+    !/golden hashes[^\n]*\n\s*run: echo/.test(w.matrixYml),
+    'no golden-hash step in the matrix is still an echo stub (U26)',
+  );
+  A(
+    typeof w.rootPkg.scripts?.['golden:browser'] === 'string' &&
+      w.rootPkg.scripts['golden:browser'].includes('tools/golden-browser.mjs'),
+    'the golden:browser script the workflow calls exists',
+  );
+  // The browser leg must advance by command, not by clock.
+  A(/cmd: 'stepN'/.test(w.driverSrc), 'the browser driver advances the run with stepN');
+  A(
+    !/cmd: 'play'/.test(w.driverSrc),
+    'the browser driver never uses `play` — wall-clock pacing would make the step count a property of the runner (§5.5)',
+  );
+
   // -- F. One PRNG across packages ------------------------------------------
   H('F. PCG32 ↔ types/procgen.ts (06 PG-2: "the same algorithm as DET-6")');
   const vector = [...(w.procgenSrc.match(/PCG32_TEST_VECTOR = \[([\s\S]*?)\]/)?.[1] ?? '').matchAll(/0x([0-9a-f]{8})/g)]
@@ -449,6 +541,8 @@ const clone = (w) => ({
   ...w,
   srcFiles: { ...w.srcFiles },
   sim: { ...w.sim },
+  sab: { ...w.sab },
+  rootPkg: { ...w.rootPkg, scripts: { ...w.rootPkg.scripts } },
   expand: { ...w.expand },
   golden: { ...w.golden },
   pieces: new Set(w.pieces),
@@ -477,6 +571,13 @@ const NEGATIVES = [
   ['bump engineVersion while leaving the goldens keyed to the old one', (w) => { w.enginePkg = { ...w.enginePkg, version: '0.2.0' }; }],
   ['shorten the golden run without re-taking the hashes', (w) => { w.corpus = { ...w.corpus, steps: 600 }; }],
   ['let a Rapier upgrade quietly add a motor force cap', (w) => { w.jointDts += '\n  setMotorMaxForce(maxForce: number): void;\n'; }],
+  ['shrink the triple buffer to two slots', (w) => { w.sab.SLOTS = 2; }],
+  ['move the SAB write counter to another header word', (w) => { w.pieceUnion = w.pieceUnion.replace('WriteCounter = 3', 'WriteCounter = 7'); }],
+  ['report an engineVersion the goldens are not keyed to', (w) => { w.engineVersionConst = '9.9.9'; }],
+  ['leave the browser golden job stubbed with an echo', (w) => { w.matrixYml = w.matrixYml.replace('run: pnpm run golden:browser --browser=${{ matrix.browser }}', 'run: echo "same golden scenes in-browser"'); }],
+  ['re-stub the node golden job', (w) => { w.matrixYml = w.matrixYml.replace(/run: pnpm run golden$/m, 'run: echo golden'); }],
+  ['drive the browser leg by wall clock instead of by stepN', (w) => { w.driverSrc = w.driverSrc.replace("cmd: 'stepN', n: want", "cmd: 'play'"); }],
+  ['delete the transport without telling 03 §1', (w) => { delete w.srcFiles['src/transport.ts']; }],
 ];
 
 console.log('\nnegative battery (each mutation must be caught):');

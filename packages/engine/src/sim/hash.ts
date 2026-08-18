@@ -28,6 +28,13 @@ const FNV_PRIME = 0x01000193;
 export const HASH_QUANTUM = 1e4;
 
 /**
+ * Floats per body in a published frame (§5.4). Spelled here rather than imported
+ * from the protocol so this module stays a leaf — `frameHash` below is the only
+ * reason it needs the number at all.
+ */
+const FRAME_FLOATS_PER_BODY = 4;
+
+/**
  * Incremental FNV-1a 32. `Math.imul` is the exact int32 multiply — plain `*`
  * would go through a double and lose the high bits above 2⁵³.
  */
@@ -107,6 +114,37 @@ export function stateHash(stepIndex: number, bodies: readonly HashableBody[]): s
     h.int32(quantizeForHash(b.y));
     h.int32(quantizeForHash(b.rot));
     h.int32(b.state | 0);
+  }
+  return h.hex();
+}
+
+/**
+ * The same hash, computed over a published §5.4 frame slab instead of over the
+ * live bodies.
+ *
+ * This exists for the browser leg of the determinism matrix (P2c). A page
+ * cannot reach into the worker's world, but it can read the shared buffer — and
+ * the four numbers the buffer carries per body (`x, y, rot, state`) are exactly
+ * the four the state hash reads. So the browser harness hashes what came out of
+ * the transport and compares it with the hash Node computed from the bodies
+ * themselves; equality is then evidence about *two* things at once, the physics
+ * and the transport that carries it.
+ *
+ * The slab is `Float32Array` while `SimCore.hash()` reads doubles from Rapier —
+ * which is lossless here, because Rapier stores f32: every value that reaches
+ * the slab is already exactly representable, so the round trip through the
+ * buffer changes nothing before quantization. `packages/engine/test/transport.test.mjs`
+ * asserts that equality over the whole corpus rather than leaving it as an
+ * argument.
+ */
+export function frameHash(stepIndex: number, transforms: Float32Array): string {
+  const h = new Fnv1a32();
+  h.int32(stepIndex);
+  for (let base = 0; base + FRAME_FLOATS_PER_BODY <= transforms.length; base += FRAME_FLOATS_PER_BODY) {
+    h.int32(quantizeForHash(transforms[base] ?? 0));
+    h.int32(quantizeForHash(transforms[base + 1] ?? 0));
+    h.int32(quantizeForHash(transforms[base + 2] ?? 0));
+    h.int32((transforms[base + 3] ?? 0) | 0);
   }
   return h.hex();
 }

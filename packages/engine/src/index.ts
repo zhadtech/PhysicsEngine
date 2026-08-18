@@ -22,10 +22,17 @@
  *   renderer exactly as §5.3 requires.
  * - `protocol` — the worker contract (also its own entry point, `@physics/engine/protocol`).
  *
- * **What is not here yet (P2b, P2c).** The Rapier world and the §6 joints, the
- * §4 step pipeline, the §7 force layer, the §8 custom constraints, §10
- * analytics, §11 snapshot/reset, and the worker shell with its SAB transport
- * (§5). Until those land the matrix's golden jobs stay stubbed.
+ * **What P2b added.** The Rapier world and the §6 joints, the §4 step pipeline,
+ * the §7 force layer, the §8 custom constraints, §10 analytics and §11
+ * snapshot/reset — with the first real golden hashes, reproduced across both
+ * ISAs by `determinism-matrix.yml`'s `node-golden` job.
+ *
+ * **What P2c added.** The other half of the matrix: `transport.ts` (the §5.4
+ * triple-buffered SharedArrayBuffer and its postMessage fallback) and
+ * `worker.ts` (the §5 protocol, the §5.1 lifecycle, the §5.5 pacer). These two
+ * files are the only ones that know a browser exists — everything under `sim/`
+ * stays environment-free (03 §1 rule 1) — and they are what lets the same
+ * hashes be read back out of a real Chromium, Firefox and WebKit.
  *
  * Contract: docs/03-SIMULATION-CORE.md
  */
@@ -56,6 +63,10 @@ export * from './sim/analytics.js';
 export * from './sim/snapshot.js';
 /** The step pipeline and run lifecycle (§4, §9) — `createSimCore()` starts here. */
 export * from './sim/step.js';
+/** The §5.4 shared-buffer transport and its fallback, plus §5.5 interpolation. */
+export * from './transport.js';
+/** The §5 worker shell: lifecycle, pacing, publishing (`attachToWorkerScope`). */
+export * from './worker.js';
 
 export const PACKAGE = {
   name: '@physics/engine',

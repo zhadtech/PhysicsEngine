@@ -6,6 +6,11 @@
 # Golden hashes are keyed by the engine build + verifier/ranking/perf versions
 # (types/infra.ts CI.GOLDEN_KEY_VERSIONS); an unexplained mismatch is an engine
 # incident, not an expected diff.
+#
+# Both legs are real as of P2c: `node-golden` replays the corpus headlessly on
+# two ISAs, `browser-golden` replays it through the worker and the shared-buffer
+# transport in Chromium, Firefox and WebKit. They compare against the same
+# committed file with the same comparison code.
 name: determinism-matrix
 
 on:
@@ -65,15 +70,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      # P2c wires this leg: the same corpus and the same goldens, run through
-      # worker.ts + the SAB transport in a real browser. The Node goldens above
-      # are the numbers it must match.
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Wired at P2c. `--with-deps` installs the system libraries the browser
+      # needs on a bare runner; it is a no-op on a machine that already has them.
       - name: install Playwright browsers
-        run: echo "npx playwright install --with-deps ${{ matrix.browser }}"
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      # The same corpus, the same run plan and the same committed goldens as the
+      # node-golden job above — driven through worker.ts and read back out of the
+      # §5.4 shared buffer inside a real browser, over both transports §5.3
+      # offers. The verdict is tools/golden-compare.mjs, shared with the Node
+      # leg, so "agreement" means one thing across the whole matrix.
       - name: browser SimCore golden hashes
-        run: echo "same golden scenes in-browser; hash must equal the Node golden"
-      - name: perf regression gate (09 §9)
+        run: pnpm run golden:browser --browser=${{ matrix.browser }}
+      # Still a stub, and deliberately: the render/perf gate needs a renderer,
+      # which arrives with apps/web at P3 (12-ROADMAP §5 — Alpha exits on P2's
+      # hashes *and* P3's per-tier gate). Nothing about it blocks P2.
+      - name: perf regression gate (09 §9) — P3
         run: echo "per-tier frame p95 + draw-call ceiling vs committed PERF_VERSION baselines"

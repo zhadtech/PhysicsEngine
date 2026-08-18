@@ -138,7 +138,7 @@ The project's quality bar has been "verified, not just written" since M1. The ro
 | `deploy.yml` (gated) | 10 §6.3 | migrations before traffic, expand-then-contract, same image promoted; blocked unless the above are green | P8 |
 | production divergence | 10 §7 (D24) | `idx_run_reports_divergence` = live U9 — the design's promise, watched in prod | P8 |
 
-The single most important line in the whole plan: **the determinism-matrix is stubbed today and becomes real at P2.** That is the moment U9 stops being "resolved by construction" and becomes "measured." Until then every green build is a green *shape*; after it, the central bet is empirically settled.
+The single most important line in the whole plan: **the determinism-matrix is stubbed today and becomes real at P2.** That is the moment U9 stops being "resolved by construction" and becomes "measured." Until then every green build is a green *shape*; after it, the central bet is empirically settled. **That moment has happened** — the Node leg at P2b, the browser leg at P2c: the same eight scenes, the same 3 600 steps, the same hashes, on two ISAs and in all three browser engines.
 
 ---
 
@@ -157,7 +157,7 @@ Every open question raised across Sessions 1–11 is placed here in exactly one 
 | U5 | SAB cross-origin isolation / embeds | D22 — COOP/COEP `credentialless` + µs-scale identical-result embed fallback. Live at P8. |
 | U6 | Rope-over-pulley constraint | 03 custom Gauss-Seidel shared-budget unilateral constraint. |
 | U8 | Belt/chain visual | D9 — `gearMesh` visuals & auto-management from `ratio`. |
-| U9 | Cross-ISA / cross-browser identity | D23 — `determinism-matrix`, three-way-pinned. Empirical at **P2** (U26). |
+| U9 | Cross-ISA / cross-browser identity | D23 — `determinism-matrix`, three-way-pinned. **Closed empirically at P2 (S16 + S17).** The 8-scene corpus reproduces bit-for-bit under Node 20/22 on linux-x64 and macos-arm64 (`node-golden`, P2b) *and* in Chromium 151, Firefox 153 and WebKit 26.5 through the §5 worker and the §5.4 shared buffer, over both transports (`browser-golden`, P2c). |
 | U13 | Cross-device drafts | D26 — the single-user degenerate case of the collab CRDT (11 §4.3, phase 1, post-1.0). |
 | U15 | Account deletion / export / erasure | D25 — over existing `deleted_at` columns; live at P8. |
 | U23 | User-authored challenges | D27 — a pro entitlement over the closed rule vocabulary + existing moderation. |
@@ -166,7 +166,7 @@ Every open question raised across Sessions 1–11 is placed here in exactly one 
 
 | U | Question | Owning phase | Re-measure trigger |
 |---|---|---|---|
-| U7 | Catalog density/force defaults | P2 | analytic pass (D8) confirmed under real sim; change = schemaVersion 2 + migration |
+| U7 | Catalog density/force defaults | P2 | **confirmed under the real solver at P2b** (a 25 N/m spring sags 13.0 mm under a default crate, exactly `mg/k`; 03 §15). Any further change = schemaVersion 2 + migration |
 | U10 | Gear stage in procgen | P5 | motor half **resolved at P2b** (03 §8.3 — the binding has no force cap, so motors are our own P4 constraints; a commanded gear holds speed under load, an over-capped one stalls). What remains is the 06 CT-2 stage-design judgement |
 | U11 | Presentation asset / art pass | P3 | materials, belt/rope meshes, SFX from `impulse` |
 | U12 | Touch interaction set | P3 | validate on real devices; adjust `EDITOR` constants only |
@@ -176,7 +176,7 @@ Every open question raised across Sessions 1–11 is placed here in exactly one 
 | U20 | Verify cost constants (`VERIFY.COST_MODEL`) | P2/P7 | re-measure on real SimCore; the 250→500-body knee is a benchmark artifact |
 | U24 | Adaptive-quality thresholds + tier auto-detect | P3 | real-device frame telemetry |
 | U25 | Per-tier hardware perf baselines | P3 | commit real baselines to the perf gate |
-| U26 | CI golden hashes are stubs | **P2** | wire SimCore/render/perf; commit first real baseline — closes U9 |
+| U26 | CI golden hashes are stubs | **P2** | **closed.** `node-golden` wired at P2b with the first real baseline; `browser-golden` wired at P2c against the same committed file, judged by the same `tools/golden-compare.mjs`. The render/perf half of the browser job stays stubbed and moves to P3 with the renderer, where 12-ROADMAP §5 always placed it |
 | U14 | External vendor picks (storage/CDN/email) | P4/P8 | narrowed to a deploy-time choice behind drivers |
 
 **Bucket C — post-launch / business (needs real scale or a non-engineering decision).**

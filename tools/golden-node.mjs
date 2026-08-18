@@ -23,6 +23,7 @@
 //   pnpm run golden:update    rewrite them (a reviewed act — see corpus.json)
 
 import { readFileSync, writeFileSync } from 'node:fs';
+import { compareKey, compareScene } from './golden-compare.mjs';
 import { ROOT, readRepoJson, repoPath } from './repo.mjs';
 
 /** Header written into the golden file, so a reader knows what they are looking at. */
@@ -100,15 +101,6 @@ async function runScene(name) {
   };
 }
 
-/** First differing checkpoint — the step a divergence began at. */
-function firstDivergence(got, want) {
-  const n = Math.max(got.length, want.length);
-  for (let i = 0; i < n; i++) {
-    if (got[i] !== want[i]) return { index: i, got: got[i] ?? '(missing)', want: want[i] ?? '(missing)' };
-  }
-  return null;
-}
-
 const measured = {};
 const timings = {};
 for (const entry of corpus.scenes) {
@@ -139,37 +131,12 @@ console.log(`golden-node — ${key.engineVersion} on ${process.platform}-${proce
 console.log(`  physics build: ${key.physicsBuild}`);
 console.log('');
 
-A(golden.key.engineVersion === key.engineVersion, `goldens are keyed to this engineVersion (${golden.key.engineVersion})`);
-A(golden.key.physicsBuild === key.physicsBuild, `goldens are keyed to this physics build (${golden.key.physicsBuild})`);
-A(golden.steps === corpus.steps, `run length matches the corpus plan (${golden.steps} steps)`);
-A(
-  golden.checkpointEvery === corpus.checkpointEvery,
-  `checkpoint cadence matches the corpus plan (every ${golden.checkpointEvery})`,
-);
+for (const finding of compareKey(key, corpus, golden)) A(finding.ok, finding.msg);
 
 for (const entry of corpus.scenes) {
   const got = measured[entry.name];
-  const want = golden.scenes[entry.name];
   console.log(`\n${entry.name} — ${entry.why}`);
-  if (want === undefined) {
-    A(false, 'has a committed golden (run `pnpm run golden:update` if the scene is new)');
-    continue;
-  }
-  A(got.bodyCount === want.bodyCount, `body count ${got.bodyCount}`);
-  A(JSON.stringify(got.warnings) === JSON.stringify(want.warnings), `load warnings ${JSON.stringify(got.warnings)}`);
-  A(got.endStep === want.endStep, `ends at step ${got.endStep}`);
-  A(got.finishReason === want.finishReason, `finish reason ${String(got.finishReason)}`);
-  const diverged = firstDivergence(got.checkpoints, want.checkpoints);
-  A(
-    diverged === null,
-    diverged === null
-      ? `all ${got.checkpoints.length} checkpoint hashes match (final ${got.analytics.finalHash})`
-      : `checkpoint ${diverged.index} diverges: got ${diverged.got}, golden ${diverged.want}`,
-  );
-  for (const [metric, value] of Object.entries(got.analytics)) {
-    const expected = want.analytics?.[metric];
-    A(value === expected, `analytics.${metric} = ${JSON.stringify(value)}`);
-  }
+  for (const finding of compareScene(got, golden.scenes[entry.name])) A(finding.ok, finding.msg);
   console.log(`  --   ${timings[entry.name].toFixed(0)} ms for ${got.endStep} steps over ${got.bodyCount} bodies`);
 }
 
