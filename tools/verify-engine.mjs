@@ -408,11 +408,25 @@ function runChecks(w, log) {
   // -- E. Package surface ---------------------------------------------------
   H('E. Package surface');
   const modules = Object.keys(w.srcFiles).filter((f) => f !== 'src/index.ts');
+  // A module earns its place either through the barrel or as a subpath entry point
+  // package.json declares (`./protocol`, `./geometry`). Both are doors a consumer can
+  // actually open; anything else is dead code shipped in `files`.
+  const entryPoints = new Set(
+    Object.entries(w.enginePkg.exports ?? {})
+      .filter(([sub]) => sub !== '.')
+      .map(([, cond]) => (typeof cond === 'string' ? cond : cond?.default))
+      .filter((p) => typeof p === 'string')
+      .map((p) => p.replace(/^\.\/dist\//, '').replace(/\.js$/, '.ts')),
+  );
+  A(entryPoints.size > 0, `package.json declares ${entryPoints.size} subpath entry point(s): ${[...entryPoints].join(', ')}`);
   const unreachable = modules.filter((f) => {
     const spec = f.replace(/^src\//, './').replace(/\.ts$/, '.js');
-    return !w.indexSrc.includes(spec);
+    return !w.indexSrc.includes(spec) && !entryPoints.has(f);
   });
-  A(unreachable.length === 0, `every src module is exported from index.ts (unreachable: ${unreachable.join(', ') || 'none'})`);
+  A(
+    unreachable.length === 0,
+    `every src module is reachable — barrel or declared entry point (unreachable: ${unreachable.join(', ') || 'none'})`,
+  );
 
   // -- G. Golden corpus integrity (P2b) --------------------------------------
   H('G. Golden corpus (03 §12)');
@@ -563,6 +577,7 @@ const NEGATIVES = [
   ['add an engine constant that no spec prose fixes', (w) => { w.sim.MYSTERY_FUDGE = 0.42; }],
   ['rename a body piece in the geometry table', (w) => { w.pieces = new Set([...w.pieces].map((p) => (p === 'plate' ? 'pad' : p))); }],
   ['stop exporting the geometry module from index.ts', (w) => { w.indexSrc = w.indexSrc.replace("export * from './sim/geometry.js';", ''); }],
+  ['ship a second entry point package.json never declares', (w) => { const { './geometry': _drop, ...rest } = w.enginePkg.exports; w.enginePkg = { ...w.enginePkg, exports: rest }; }],
   ['break the PRNG that procgen shares', (w) => { w.pcg = [...w.pcg.slice(0, 5), 0]; }],
   ['add a corpus scene with no committed golden', (w) => { w.sceneFiles = [...w.sceneFiles, 'zz-new'].sort(); w.gate = { ...w.gate, 'zz-new': 'ok' }; }],
   ['commit a corpus scene the shared validation gate rejects', (w) => { w.gate = { ...w.gate, catalog: 'E_SEMANTIC' }; }],

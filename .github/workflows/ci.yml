@@ -59,6 +59,8 @@ jobs:
           - scene
           # DET-5 exact-ops discipline, cross-engine dmath goldens, 03 §6 tables (P2)
           - engine
+          # builder model ↔ 04 (copy, constants, catalogs, keymap) + layering (P3)
+          - web
           # OpenAPI 3.1 + real PG grammar (pgsql-parser) + three-way error codes
           - backend
           # workflow structure, U9 matrix ↔ types/infra.ts, migrations, isolation

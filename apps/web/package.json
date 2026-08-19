@@ -4,12 +4,45 @@
   "private": true,
   "type": "module",
   "description": "React builder (place/move/rotate/link, snap, anchors), Three.js InstancedMesh renderer, play-mode UI over the 03 §5 worker protocol, analytics panel, IndexedDB local drafts.",
-  "main": "src/index.ts",
+  "_comment": [
+    "P3a fills in the headless half: the editor model migrated from types/editor.ts,",
+    "the command algebra and history, id generation, the snapping system, the",
+    "reference cascades, the strict writer and the draft ring. All of it is",
+    "framework-free and DOM-free on purpose — it is the part that can be held to",
+    "04 by node:test rather than by looking at it, and P3c wraps it in Zustand +",
+    "React without changing a line of it.",
+    "Build posture is D30: emit to dist/, run node:test over the emitted JS,",
+    "because ci.yml's `unit` job includes Node 20, which cannot strip TypeScript.",
+    "It depends on @physics/engine/geometry rather than the engine barrel: the",
+    "barrel imports the Rapier WASM at module scope (03 §5.3's shared geometry",
+    "needs no physics build, and edit mode has no world loaded)."
+  ],
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@physics/engine": "workspace:*",
+    "@physics/scene-format": "workspace:*",
+    "three": "0.185.1"
   },
   "physics": {
     "phase": "P3",
     "contract": "docs/04-BUILDER-UX.md"
+  },
+  "devDependencies": {
+    "@types/three": "0.185.0"
   }
 }

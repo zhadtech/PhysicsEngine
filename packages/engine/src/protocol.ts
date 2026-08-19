@@ -101,8 +101,18 @@ export const enum SabHeader {
   // 11 reserved
 }
 
-/** Value of the per-body `state` float. */
-export const enum BodyState {
+/**
+ * Value of the per-body `state` float.
+ *
+ * A plain `enum`, not a `const enum` like its two neighbours, because it is the
+ * one the *renderer* reads: `const enum` members are inlined at the use site,
+ * which a consumer package compiled with `verbatimModuleSyntax` cannot do across
+ * the boundary (P3b). Exporting the values as a second frozen object instead
+ * would be two declarations of one thing — the failure mode 03 §5.3 and 04 §14
+ * both exist to avoid — so the declaration is widened rather than mirrored. The
+ * cost is a property read in the publish loop instead of a literal.
+ */
+export enum BodyState {
   Asleep = 0,
   Awake = 1,
   Removed = 2,
