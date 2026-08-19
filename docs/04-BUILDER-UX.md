@@ -3,7 +3,7 @@
 **Status:** Accepted (Session 4, 2026-07-19) — normative for the builder, test mode, and player UI
 **Implements:** brief item 5; the UI half of ADR-0003
 **Consumes:** `02-SCENE-FORMAT.md` (catalog, anchors, validation), `03-SIMULATION-CORE.md` (§5 protocol, §5.5 interpolation, §9 lifecycle, §10 analytics), `types/scene.ts`, `types/protocol.ts`
-**Companion file:** `types/editor.ts` (tool/command/keymap/inspector-descriptor types + editor constants — the machine-checked half of this spec)
+**Companion files:** `apps/web/src/editor/model.ts` (tool/command/keymap/inspector-descriptor types + editor constants — the machine-checked half of this spec; moved into the app at P3, `types/editor.ts` is now a forwarding stub), and the rest of `apps/web/src/editor/` (store, command algebra, snapping, strict writer, budgets, drafts); `tools/verify-web.mjs` holds this document and that code to one set of values
 **Consumed by:** M4 (save/share API needs), M5/M6 (Generate entry point), M7 (gallery/player detail), M8 (rendering budget)
 
 ---
@@ -85,7 +85,7 @@ Test-mode substates mirror the worker FSM (03 §5.1) one-to-one; the UI holds no
 ```
 
 - **Top bar:** home, editable title (`meta.title`), undo/redo, the **Test** toggle (renders as ▶ in edit, ✎ Exit in test), save state (`⟳saved` / `● unsaved` / offline dot), **Generate** (opens the procgen/AI dialog — reserved affordance, content M5/M6), user menu.
-- **Palette (left):** the 18 object types + 5 link tools in six groups (normative grouping in `types/editor.ts` `PALETTE_GROUPS`): Structure, Movers, Mechanisms, Fields, Logic, Links. Type-to-search (`/`) filters across groups. Items show name + icon; drag out or click to arm the place tool (§5.2).
+- **Palette (left):** the 18 object types + 5 link tools in six groups (normative grouping in `apps/web/src/editor/model.ts` `PALETTE_GROUPS`): Structure, Movers, Mechanisms, Fields, Logic, Links. Type-to-search (`/`) filters across groups. Items show name + icon; drag out or click to arm the place tool (§5.2).
 - **Tool options row:** appears only when the active tool has options (domino-run spacing, surface-snap toggle, link-type selector); otherwise collapsed.
 - **Inspector (right):** context panel — §8. Collapsible (⇥ key on the panel); canvas reflows.
 - **Status bar:** cursor position in meters (board frame), snap-step selector, grid toggle, zoom, live counts against limits (02 §7 + expanded-body estimate vs `MAX_DYNAMIC_BODIES`), validation chip (§8.5).
@@ -116,9 +116,9 @@ Palette and inspector editing are disabled (lock icons, tooltip "Exit Test to ed
 
 ## 4. Canvas: camera, grid, units
 
-- **Camera.** Perspective, "workshop table": pan (X/Y), dolly zoom, and pitch **tilt clamped 0–35°** (default **15°**). No yaw orbit, no roll — the 2D mental model survives (01 §3.2). `C` cycles presets Front (0°) ⇄ Table (15°). Zoom range: from fit-bounds + 20% margin down to ~1 cm spanning ~50 px. Wheel = zoom to cursor; Space+drag / middle-drag / two-finger = pan; `F` frames selection (or bounds when nothing selected); `0` resets camera.
+- **Camera.** Perspective, "workshop table": pan (X/Y), dolly zoom, and pitch **tilt clamped 0–35°** (default **15°**), vertical **FOV 50°**. No yaw orbit, no roll — the 2D mental model survives (01 §3.2); the rig has exactly three degrees of freedom (target, distance, tilt), so no yaw angle is representable. `C` cycles presets Front (0°) ⇄ Table (15°). Zoom range: from fit-bounds + **20 %** margin down to **1 cm spanning 50 px** — a *resolution*, so the near limit depends on the viewport, and "fits" means the bounds rectangle inside the frustum measured in the board plane through the target (tilting therefore never changes how far out you may zoom). Wheel = zoom to cursor; Space+drag / middle-drag / two-finger = pan (the vertical component divided by `cos(tilt)`, or a tilted drag lags the pointer); `F` frames selection (or bounds when nothing selected); `0` resets camera. Implementation: `apps/web/src/render/camera.ts`.
 - **planeAngle visualization.** The renderer rolls the view by `−planeAngle` clamped to ±25° (a 90° wall-run scene rendered fully rolled would be unusable); a **gravity compass** arrow is always visible while `planeAngle ≠ 0`. Same behavior in edit and test — edit-time WYSIWYG. Cursor coordinates are always board-frame.
-- **Grid.** Rendered on the physics plane, origin center, minor/major lines; minor line pitch follows the current snap step (§6.1) — *what you see is what you snap to*. `world.bounds` renders as the table edge; objects outside bounds get the W10 tint (02 §8).
+- **Grid.** Rendered on the physics plane, origin center, minor/major lines — **a major line every 10 minor**, counted from the origin so panning slides the grid instead of reshuffling which lines are heavy. Minor line pitch follows the current snap step (§6.1) — *what you see is what you snap to*. `world.bounds` renders as the table edge; objects outside bounds get the W10 tint (02 §8), tested on the object's **extent** rather than its reference point. Implementation: `apps/web/src/render/grid.ts`.
 - **Units display.** Meters with up to 4 decimals (matches the quantization rule 02 §2), degrees for angles. Inspector fields carry unit suffixes (m, °, kg/m², N, N·m, m/s, deg/s, s).
 
 ---
@@ -135,7 +135,7 @@ Palette and inspector editing are disabled (lock icons, tooltip "Exit Test to ed
 - **Drag-and-drop:** dragging a palette item onto the canvas places one instance and returns to Select (the brief's baseline gesture; also the primary touch path).
 - **Domino run (signature tool):** with `place:domino` armed, **drag** draws a path; dominoes are placed along it at spacing `DOMINO_RUN_SPACING_FACTOR × h` (default 0.75 × 0.08 = 6 cm, matching 02 §10.1), each perpendicular to the local path direction. Shift constrains the path to a straight line. Spacing is adjustable 0.4–0.95 × h in the tool options row. One composite undo step (§9).
 - **Surface snap (smart drop):** while placing or dragging, if a cast along the current gravity direction (`rotate((0,−1), planeAngle)`) hits **static** geometry (platform/ramp/curve/conveyor, from the shared expand-geometry module — 03 §5.3) within `SURFACE_SNAP_RANGE_M = 0.02`, the ghost seats on the surface (reference-point aware: a domino lands on its base). Indicator line shows the seat. Hold `Alt` to bypass. Dynamic bodies are never snap targets (predicting rest on them is a lie).
-- **IDs** are generated `<prefix><n>` per `ID_PREFIX` in `types/editor.ts` (`dom12`, `mesh3`…), `n` = smallest unused positive integer for that prefix. IDs are renameable in the inspector (validated against pattern + uniqueness; renames cascade through all references as one command).
+- **IDs** are generated `<prefix><n>` per `ID_PREFIX` in `apps/web/src/editor/model.ts` (`dom12`, `mesh3`…), `n` = smallest unused positive integer for that prefix. IDs are renameable in the inspector (validated against pattern + uniqueness; renames cascade through all references as one command).
 
 ### 5.3 Selection
 
@@ -176,7 +176,7 @@ Multi-select: drag moves all; rotation rotates positions about the selection bbo
 
 ## 6. Snapping system
 
-All thresholds are normative constants in `types/editor.ts` (`EDITOR`).
+All thresholds are normative constants in `apps/web/src/editor/model.ts` (`EDITOR`).
 
 ### 6.1 Grid and rotation
 
@@ -236,7 +236,7 @@ Selecting a `trigger` draws dashed arrows to each target; the inspector `targets
 
 ### 8.1 Descriptor-driven, by construction
 
-The inspector renders from `TYPE_PROP_FIELDS` / `LINK_PROP_FIELDS` in `types/editor.ts` — per-type field descriptors (kind, unit, range, step, default) whose **keys are compile-time-checked** against the prop types in `types/scene.ts` (a typo'd field name fails `tsc`). Ranges mirror `scene.schema.json`; defaults come from the 02 §5.3 tables and `MATERIAL_DEFAULTS`. One source of truth, three consumers: schema (validation), types (compile), editor (UI).
+The inspector renders from `TYPE_PROP_FIELDS` / `LINK_PROP_FIELDS` in `apps/web/src/editor/model.ts` — per-type field descriptors (kind, unit, range, step, default) whose **keys are compile-time-checked** against the prop types in `types/scene.ts` (a typo'd field name fails `tsc`). Ranges mirror `scene.schema.json`; defaults come from the 02 §5.3 tables and `MATERIAL_DEFAULTS`. One source of truth, three consumers: schema (validation), types (compile), editor (UI).
 
 Object sections, in order: **Identity** (id + rename, type, skin picker §12.3) · **Transform** (`pos.x`, `pos.y`, `rot`) · **<Type>** (the type's own fields) · **Material** (per `MATERIAL_SECTION`: dynamic types get `density/friction/restitution/magnetic/anchored`, static surfaces get `friction/restitution`, fields/sensors get none) · **Motion** (`vel`, `angVel`; collapsed by default) · **Links** (attached links; click selects).
 
@@ -276,12 +276,13 @@ Live validation (schema + semantic, shared `scene-format`) runs debounced ~300 m
 
 ## 9. Undo/redo model
 
-Command-pattern over the store; types in `types/editor.ts` (`EditorCommand`).
+Command-pattern over the store; types in `apps/web/src/editor/model.ts` (`EditorCommand`), algebra in `apps/web/src/editor/commands.ts`.
 
-- **Commands:** `add`, `remove` (captures removed objects/links **and** the reference-cascade edits for exact undo), `transform` (before/after per id), `props` (dot-path key, before/after; `undefined` = "omitted/default"), `world`, `meta`, `rename` (cascade derivable), `composite` (label + children — domino runs, paste, gear-snap+mesh, delete cascades).
+- **Commands:** `add`, `remove` (captures removed objects/links, **the document index each sat at**, **and** the reference-cascade edits for exact undo), `transform` (before/after per id), `props` (dot-path key, before/after; `undefined` = "omitted/default"), `world`, `meta`, `rename` (cascade derivable), `composite` (label + children — domino runs, paste, gear-snap+mesh, delete cascades).
 - **Coalescing:** one command per gesture — pointer-up commits a drag; scrub commits on release; typing commits on blur/Enter. No time-window merging (predictable granularity).
 - **History:** ring buffer `HISTORY_CAP = 200` commands; redo stack clears on new command; the store tracks a save-pointer — dirty ⇔ cursor ≠ save-pointer (drives the top-bar dot and `beforeunload` guard).
 - **Undo re-selects** the ids a command touched (§5.3).
+- **What "exact" costs `remove`** (clarified at P3a, §17). The capture must include *positions*, not only content: re-adding at the end of the array after an undo leaves a different document. Physics does not notice — DET-3 sorts by id at load — but §14's export does, so a delete-then-undo would return a file with its objects shuffled and "imports byte-stable" would hold only for documents nobody had edited. `remove` therefore carries `at: { objects, links }`, the pre-delete index of each captured entity, and reference entries are restored at the positions they held (a trigger's `targets` order is observable in the activation chain). This also means `remove` is the one command with **no inverse inside the union** — `add` cannot carry a cascade — so undo runs a command backwards rather than applying an inverted one.
 - **Test mode:** editing commands are rejected while in test (01 §3.3 rule 2); undo/redo shortcuts are disabled; history is preserved across enter/leave. Leaving test never mutates the store — the run's world is discarded, not merged.
 
 ---
@@ -370,13 +371,13 @@ Belt ribbons are per-link generated geometry (few in any scene — no instancing
 
 ### 12.2 Ropes, pulleys, fields
 
-- Ideal rope (`segments 0`, no via): straight when taut; slack renders as a quadratic sag between endpoints (depth ∝ slack). Segmented ropes follow their capsule bodies (registry pieces `segN`).
+- Ideal rope (`segments 0`, no via): straight when taut; slack renders as a quadratic sag between endpoints, at the depth that makes the **drawn curve as long as the rope** — `h = √(3·chord·slack / 8)`, from the parabolic arc-length approximation, capped at `length / 2`. (Depth *linear* in slack, as this line first read, draws a curve longer than the rope it depicts as soon as the slack is appreciable — corrected at P3b, §17.) The sag hangs along scene gravity, so a tilted board hangs sideways. Segmented ropes follow their capsule bodies (registry pieces `segN`).
 - `via` ropes: polyline through each pulley's **rim** with tangent wrap arcs — visually wrapping the wheel even though the constraint uses centers (03 §8.2); the ≤ r discrepancy is accepted and documented here.
 - Fields/sensors in test mode: active fan cones and magnet radii render faintly (they're invisible forces — make them legible); `ActuatorEvent` flips the visual on/off. Triggers/goals show as glass zones in edit, near-invisible in test until they fire (⚡/🏁 pulse).
 
 ### 12.3 Skin name set v1
 
-02 §5.1 defers the skin catalog here. Normative **names** (visual definitions = M8/U11): `wood` · `steel` · `brass` · `stone` · `glass` · `rubber` · `neon` · `candy`. Per-type defaults in `types/editor.ts` (`DEFAULT_SKIN`: domino wood, marble glass, gear brass, crate wood, platform stone, …). Unknown skin in a file → type default (02 §5.1); the picker shows swatches once M8 defines materials — until then, flat colors.
+02 §5.1 defers the skin catalog here. Normative **names** (visual definitions = M8/U11): `wood` · `steel` · `brass` · `stone` · `glass` · `rubber` · `neon` · `candy`. Per-type defaults in `apps/web/src/editor/model.ts` (`DEFAULT_SKIN`: domino wood, marble glass, gear brass, crate wood, platform stone, …). Unknown skin in a file → type default (02 §5.1); the picker shows swatches once M8 defines materials — until then, flat colors.
 
 Audio is explicitly deferred to the M8 presentation pass (U11): `CollisionEvent.impulse` is the designed SFX driver; no UI reserves space for it in v1.
 
@@ -384,7 +385,7 @@ Audio is explicitly deferred to the M8 presentation pass (U11): `CollisionEvent.
 
 ## 13. Input reference
 
-Machine-readable map: `DEFAULT_KEYMAP` in `types/editor.ts` (single source; this table is its rendering). `mod` = Cmd (mac) / Ctrl (win/linux).
+Machine-readable map: `DEFAULT_KEYMAP` in `apps/web/src/editor/model.ts` (single source; this table is its rendering). `mod` = Cmd (mac) / Ctrl (win/linux).
 
 ### 13.1 Keyboard
 
@@ -444,8 +445,9 @@ Full keyboard operability for all panels; canvas selection + nudge/rotate/delete
 3. **Handles edit props, never free transforms** (§5.4) — the editor cannot express anything the format can't.
 4. **Timeline is an event log, not a scrub bar** in v1 (§10.4) — honest about the single step-0 snapshot (03 §11); rewind is a designed-for future.
 5. **Test mode = full serialize → validate → load round-trip** (§10.1) — what plays is exactly what saves (and DET-4 makes the round-trip bit-stable).
-6. **Descriptor-driven inspector** with compile-checked keys (§8.1, `types/editor.ts`).
+6. **Descriptor-driven inspector** with compile-checked keys (§8.1, `apps/web/src/editor/model.ts`).
 7. Deferred: sound design (M8/U11), autoplay previews in gallery (perf), two-finger-twist rotation (U12), live editing during simulation (explicitly out per 01 §3.3 — revisit only with a rewind architecture).
+8. **`remove` captures positions, and undo runs commands backwards** (§9, added at P3a): "exact undo" is a claim about the document, not only about its contents, and the command union as designed could not restore array order. See §17.
 
 ---
 
@@ -454,3 +456,19 @@ Full keyboard operability for all panels; canvas selection + nudge/rotate/delete
 - **U11 (new):** presentation asset pass — skin materials for the §12.3 names, belt/rope meshes and animation polish, SFX palette driven by `CollisionEvent.impulse`, `InstancedMesh` strategy for skins × types. → M8.
 - **U12 (new):** touch interaction set needs validation on real devices (gesture conflicts, handle sizes, anchor sheet flow). → prototype at first implementation; adjust `EDITOR` constants only (no format impact).
 - U8 → **resolved** (D9, §12.1).
+
+---
+
+## 17. Changelog
+
+- **2026-07-19 (Session 4, M3):** initial acceptance. D9 (belt/mesh visuals by ratio sign), the geometric-vs-manual `gearMesh` rule, prop-handle-only transforms, the event-log timeline, the serialize→validate→load Test round trip, the descriptor-driven inspector.
+- **2026-08-19 (Session 18, P3a):** implementation clarifications only — no behaviour redesigned, nothing renamed, no constant retuned.
+  - The companion file **moved to `apps/web/src/editor/model.ts`** (12-ROADMAP §3 P3); `types/editor.ts` is a forwarding stub, the arrangement `types/scene.ts` got at P1 and `types/protocol.ts` at P2. Every path reference in this document moved with it, and `tools/verify-web.mjs` asserts both that the stub stays pure and that this document names the real path.
+  - **§9: `remove` carries `at: { objects, links }`.** The union could restore what a delete took but not where it sat, so a delete-then-undo silently rewrote document order — invisible to physics (DET-3 sorts by id at load), fatal to §14's byte-stable export. Undo consequently runs a command backwards rather than applying an inverse, because `add` cannot express a captured cascade.
+  - **§6.2's precedence ladder is implemented literally** — seat > grid > alignment > spacing, first applicable rule wins. One consequence is worth naming rather than discovering: with the grid on (the default) alignment and spacing never *move* the ghost, so they read as guides until `G` turns the grid off. Both are still computed and drawn. Whether that is the right feel is a real-device question and rides with **U12**; changing it would touch this ladder and the `EDITOR` constants, never the format.
+
+- **2026-08-19 (Session 19, P3b):** renderer clarifications — again no behaviour redesigned and no constant retuned, but one formula corrected.
+  - **§4 gains the numbers a perspective camera needs**: vertical FOV **50°** (§4 stated the zoom range in pixels, which is only a distance once an FOV exists — Three.js's own default is adopted rather than a value invented), what "fit bounds" fits, and the grid's **major-every-10** ratio. All four were silences, not disagreements; the zoom limits derive from the FOV rather than being tuned against it.
+  - **§12.2's rope sag is corrected from linear to `√`**. "Depth ∝ slack" draws a curve longer than the rope it depicts: a parabola of chord `L` and depth `h` has arc length ≈ `L(1 + 8h²/3L²)`, so matching the drawn curve to the rope's own length gives `h = √(3·L·slack/8)`. This is the only *substantive* change in this pass, and it replaces a tuned proportion with a derived one.
+  - **§10.3's "desaturates ~15%" and 09 §4's `SLEEP_DIM_FACTOR 0.6` are two channels of one treatment**, not two values for one thing; both now exist as constants (`RENDER.SLEEP_DESATURATE`, `RENDER.SLEEP_DIM_FACTOR`) so neither can silently stand in for the other.
+  - The **render half of `types/perf.ts` moved to `apps/web/src/render/perf.ts`** (12-ROADMAP §3 P3); unlike the P3a migration this is a *partial* stub, because `READPATH` belongs to P4's api and `FAST_PREVIEW` to P5's procgen. See 09 §12.

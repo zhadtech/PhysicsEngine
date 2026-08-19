@@ -31,7 +31,7 @@ import { SIM } from '../protocol.js';
 import type { CanonicalLink, CanonicalObject, CanonicalScene } from './canonical.js';
 import { datan2, dcos, dsin, length2 } from './dmath.js';
 import type { ColliderShape, PieceGeometry } from './geometry.js';
-import { EXPAND, objectGeometry, resolveAnchor } from './geometry.js';
+import { EXPAND, countDynamicBodies, objectGeometry, resolveAnchor } from './geometry.js';
 import type { Rapier } from './rapier.js';
 
 /** A load that cannot produce a world (§5.3 error codes). */
@@ -289,28 +289,6 @@ export function worldToLocal(body: RigidBody, p: Vec2): Vec2 {
   const dx = p[0] - t.x;
   const dy = p[1] - t.y;
   return [dx * c + dy * s, -dx * s + dy * c];
-}
-
-/**
- * How many dynamic bodies this scene expands to.
- *
- * Counted before anything is built, so a scene over `MAX_DYNAMIC_BODIES` fails
- * with `E_LIMITS` instead of allocating its way there first — 8 000 bodies is
- * exactly the size at which "build it, then check" is the wrong order.
- */
-function countDynamicBodies(scene: CanonicalScene): number {
-  let n = 0;
-  for (const obj of scene.objects) {
-    if (obj.material.anchored) continue;
-    for (const piece of objectGeometry(obj).pieces) if (piece.kind === 'dynamic') n++;
-  }
-  for (const link of scene.links) {
-    if (link.type !== 'rope') continue;
-    const via = (link.props as { via?: readonly Id[] }).via ?? [];
-    const segments = linkNum(link, 'segments') ?? 0;
-    if (via.length === 0 && segments >= 2) n += segments;
-  }
-  return n;
 }
 
 interface Builder {

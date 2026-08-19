@@ -13,6 +13,13 @@
     "`./protocol` is a second entry point so the design-phase type files can",
     "re-export the worker protocol without pulling the simulation core in with",
     "it; types/protocol.ts is that stub.",
+    "`./geometry` is a third, added at P3: sim/rapier.ts imports the WASM at",
+    "module scope, so the barrel drags a physics build into any consumer — and",
+    "the builder needs 03 §5.3's shared geometry while in edit mode with no",
+    "world loaded. Re-exports only; no code of its own.",
+    "`./transport` is a fourth, added at P3b, for the same reason from the other",
+    "side: the §5.4 reader and the §5.5 interpolation rules run on the *main*",
+    "thread, which is the one thread that must never load a physics build.",
     "Version 0.1.0 at P2b: 03 \u00a72 defines engineVersion as this package's semver, and the golden hashes in goldens/state.golden.json are keyed to it. Anything that can change simulation output bumps it."
   ],
   "main": "./dist/src/index.js",
@@ -25,6 +32,14 @@
     "./protocol": {
       "types": "./dist/src/protocol.d.ts",
       "default": "./dist/src/protocol.js"
+    },
+    "./geometry": {
+      "types": "./dist/src/geometry.d.ts",
+      "default": "./dist/src/geometry.js"
+    },
+    "./transport": {
+      "types": "./dist/src/transport.d.ts",
+      "default": "./dist/src/transport.js"
     }
   },
   "files": [

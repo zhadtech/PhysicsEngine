@@ -165,7 +165,7 @@ const tsDefaults = (src, name) => {
 };
 
 /**
- * `types/editor.ts` TYPE_PROP_FIELDS → { type: { key: def } }, skipping fields
+ * The builder's TYPE_PROP_FIELDS → { type: { key: def } }, skipping fields
  * that carry no `def` (the id-list widgets, and the props whose default is
  * derived from the layout at load).
  */
@@ -420,7 +420,10 @@ function runDefaultChecks(w, log) {
 const world = {
   schema,
   sceneTs: readRepo(`${PKG}/src/scene.ts`),
-  editorTs: readRepo('types/editor.ts'),
+  // Moved out of types/ at P3 (12-ROADMAP §3) — the builder's descriptors now
+  // live in the app they belong to. Third time a migration has broken a suite
+  // that read a file by path; the fix is the same one, applied on purpose.
+  editorTs: readRepo('apps/web/src/editor/model.ts'),
   indexTs: readRepo(`${PKG}/src/index.ts`),
   doc02: md,
   srcModules: readdirSync(repoPath(PKG, 'src'))

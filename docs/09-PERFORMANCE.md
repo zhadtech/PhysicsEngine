@@ -67,13 +67,25 @@ Draw calls are bounded by *kinds*, not object count. Every catalog type is class
 | `generated` | ramp, curve (+ per-link rope sag, belt ribbons — 04 §12.1) | Bespoke per-object vertices (convex polygon, arc tessellation) — can't share one instanced mesh. Few per scene. |
 | `overlay` | pulley, fan, magnet, trigger, goal | Translucent guides (04 §12.2), never in the solid batch. |
 
-**Draw-call ceiling `MAX_INSTANCE_GROUPS = 11 × 8 = 88`** — a hard bound independent of object count (spike P4). A 5 000-domino scene is **1** instanced draw; a realistic 6-type × 3-skin mix is ~18 instanced + a few dozen generated link meshes ≈ 50–60 draws; the pathological "every (type,skin)" scene is still only 88 + overlays. `types/perf.ts` proves `INSTANCED_TYPES` is exactly the set `RENDER_CLASS` marks instanced, so reclassifying a type without updating the tuple fails compilation naming it.
+**Two ceilings, both object-count-independent (corrected at P3b — §12).**
+
+| Constant | Counts | Value |
+|---|---|---|
+| `MAX_INSTANCE_GROUPS` | **(type, skin) groups** — what material, selection and per-type LOD mesh key on | `11 × 8 = 88` |
+| `MAX_INSTANCE_DRAWS` | **`InstancedMesh` draws** — what a frame actually costs, and what the P3d gate measures | `12 × 8 = 96` |
+
+They differ by exactly one type. A group and a draw are the same thing only if every prefab of a type is a single primitive, and `pendulum` with `arm: 'rigid'` is not: 03 §6 expands it to one body carrying a **ball** bob and a **cuboid** rod whose sizes come from two independent props (`bobR`, `len`), so no unit mesh under an affine per-instance transform draws both — scale it uniformly and the rod is wrong, non-uniformly and the bob is an ellipsoid. `apps/web/src/render/classify.ts` declares the per-type primitives and `verify-web` **re-derives them from the engine's own §6 expansion**, so the 96 is measured rather than asserted.
+
+`RENDER.INSTANCE_MIN` trades one instanced draw for up to `INSTANCE_MIN − 1` individual ones when a group is nearly empty, bounding the solid batch at `MAX_INSTANCE_DRAWS × (INSTANCE_MIN − 1)` — which can only be reached by a scene small enough that draw count does not matter, and above that size every group is large and the count is back under 96.
+
+The claim the section exists to make is unchanged: a 5 000-domino scene is **1** instanced draw; a realistic 6-type × 3-skin mix is ~18 instanced + a few dozen generated link meshes ≈ 50–60 draws; the pathological "every (type,skin)" scene is still a constant, 96 + overlays. `apps/web/src/render/perf.ts` proves `INSTANCED_TYPES` is exactly the set `RENDER_CLASS` marks instanced, so reclassifying a type without updating the tuple fails compilation naming it.
 
 Render-tier knobs (`RENDER`):
-- **Sleep dimming** (`SLEEP_DIM_FACTOR 0.6`): the per-body `state` float already rides in the SAB (03 §5.4); sleeping instances desaturate and dim, making §3's dormancy legible.
+- **Sleep dimming** (`SLEEP_DIM_FACTOR 0.6` brightness, `SLEEP_DESATURATE 0.15` saturation — 04 §10.3 states the second, and they are two channels of one treatment): the per-body `state` float already rides in the SAB (03 §5.4); sleeping instances desaturate and dim, making §3's dormancy legible. `Removed` hides the instance by collapsing it to zero scale — `InstancedMesh` has no per-instance visibility, and rebuilding the buffer to close the gap would make removal cost O(bodies) exactly when a machine is busiest.
 - **LOD/culling**: frustum-cull instances outside the workshop camera; past `LOD_FAR_M` a beveled mesh drops to a flat imposter (`maxInstanceDetailLod` per tier). The tilted workshop camera (04 §4) has a bounded view volume, so culling is effective even on packed scenes.
 - **Shadows** (`SHADOW_MAP_PX 2048`) are the biggest fill cost and the first thing `mid` drops (§7).
 - **Belt/rope meshes** are per-link generated geometry (04 §12.1) — few in any scene, no instancing need, but they *are* the only object-count-linear draw term, so a scene with thousands of ropes is a documented revisit (U11).
+- **Extrusion depth** (`EXTRUDE_DEPTH_M 0.01`): D1's 2.5D split gives every box and disc a third dimension that nothing physical depends on and no spec supplied. 1 cm reads as solid at desk scale (a domino is ~4 × 8 cm) without turning a plank into a beam; spheres ignore it. Filled at P3b, replaceable by the art pass (U11).
 
 This section is the concrete half of **U11**'s asset pass: the strategy, the budget, and the LOD/sleep rules are now normative; the actual materials, meshes, and `CollisionEvent.impulse`-driven SFX remain an implementation art task (U11 stays open, narrowed).
 
@@ -126,7 +138,11 @@ The hard sim cap is universal (determinism); tiers vary **render fidelity and au
 The `low` tier is also the touch profile. The 04 §13 touch maps and `EDITOR` gesture constants stand; what M8 fixes is the *render* envelope they run inside (no shadows, LOD 0, 30 Hz floor). Real-device gesture-conflict validation and any `EDITOR` constant tweaks remain first-implementation work (U12 stays open).
 
 ### 7.2 Adaptive-quality controller
-A render-only feedback loop: if p95 frame time exceeds `DEGRADE_FRAME_RATIO` (1.25) × budget for `DEGRADE_WINDOW_FRAMES` (90 ≈ 1.5 s), drop one tier's worth of fidelity (shadows → LOD → overlays); recover after a calm window. It never throttles the worker. Thresholds and the initial tier auto-detection (GPU/UA heuristics) are unvalidated without device telemetry → **U24**.
+A render-only feedback loop: if p95 frame time exceeds `DEGRADE_FRAME_RATIO` (1.25) × budget for `DEGRADE_WINDOW_FRAMES` (90 ≈ 1.5 s), drop one tier's worth of fidelity (shadows → LOD → overlays); recover after a calm window. It never throttles the worker — the controller returns a render envelope and has no path to the worker at all, which is how D20's rule is made structural rather than remembered. The ladder's order is deliberate: shadows are the biggest fill cost and overlays carry *information* (a fan cone is the only way an invisible force is legible, 04 §12.2), so the picture gets uglier before it gets less informative.
+
+Two readings, fixed at P3b (§12): **p95 is taken over a rolling window** of `DEGRADE_WINDOW_FRAMES` samples, not "90 consecutive frames each over budget" — the latter never fires on the jittery-but-mostly-fine profile adaptation exists for; and **recovery is gated on the plain budget**, not on the 1.25× degrade threshold, because a symmetric rule oscillates forever in the band between them. A decision also needs a full window measured *since the last change*, so one degrade step cannot trigger the next off the same samples.
+
+Thresholds, both readings, and the initial tier auto-detection (GPU/UA heuristics) are unvalidated without device telemetry → **U24**; they are isolated in `apps/web/src/render/quality.ts` so validating them changes one file.
 
 ### 7.3 Procgen fast-preview (U17)
 Spike P6: a ~30-body generated machine self-checks at ~100 k steps/s, so the 06 §8.4 worst corner (~650 k simulated steps) is ~6.6 s on desktop, but **~20 s on mid and ~50 s on low-end** — unacceptable. `FAST_PREVIEW` (maxObjects = `GEN_DEFAULTS.objectCount`/2, stepFactor 0.5) runs a reduced generate+check first, shown whenever projected wall time exceeds `OFFER_THRESHOLD_MS` (3 s); the full run replaces it on accept. The 06 §8.4 budgets are counted in steps (PG-6), so this changes only *which* preset runs, never determinism. U17 narrows to: measure the real corner on target low-end hardware at implementation.
@@ -179,7 +195,7 @@ Baselines are committed per `engineVersion`/`PERF_VERSION`; a deliberate change 
 - **D21 — Backend read-path scaling posture.** Gallery/trending/feed serve from existing Postgres indexes + Redis trending zset + CDN edge-cache on immutable published docs, with no read-path simulation and no fan-out; a staged, trigger-gated escalation ladder (materialized timelines → replicas → object storage) means scale-out is planned, not reactive (§8). No new endpoints, tables, or `openapi.yaml`/`schema.sql` changes.
 
 **Resolved / narrowed:**
-- **U11** → the rendering *strategy* (instancing per type×skin, 88-group ceiling, LOD/cull/sleep-dim) is now normative (§4); materials/meshes/SFX remain an art task. Open, narrowed.
+- **U11** → the rendering *strategy* (instancing per type×skin, the 88-group / 96-draw ceilings, LOD/cull/sleep-dim) is now normative (§4); materials/meshes/SFX remain an art task — P3b ships flat placeholder colors per skin, exactly as 04 §12.3 anticipated. Open, narrowed.
 - **U12** → render envelope for the touch/`low` tier fixed (§7.1); real-device gesture validation still first-implementation. Open.
 - **U17** → fast-preview preset specified with a 3 s offer threshold (§7.3); measure the real low-end corner at implementation. Open, narrowed.
 
@@ -208,4 +224,9 @@ All spike assertions pass (regime ordering, sleeping gain, dormant-machine headr
 
 ## 12. Changelog
 
+- **2026-08-19 (Session 19, P3b):** implementation clarifications from building the renderer. No budget retuned, no tier changed, no cap moved.
+  - **§4 separates `MAX_INSTANCE_GROUPS` (88) from `MAX_INSTANCE_DRAWS` (96).** The section treated them as one number; they differ because `pendulum` with `arm: 'rigid'` is the one prefab mixing primitives (03 §6). This is additive — every existing citation of "88 groups" stays true — and the 96 is re-derived from the engine's own expansion by `verify-web` rather than asserted.
+  - **§4 gains `SLEEP_DESATURATE` and `EXTRUDE_DEPTH_M`.** The first reconciles 04 §10.3's "~15 %" with this section's `SLEEP_DIM_FACTOR` (two channels, not two values); the second is the 2.5D depth D1 implies and no spec supplied.
+  - **§7.2's two ambiguous readings are fixed** (rolling-window p95; recovery gated on the plain budget) and the "never throttles the worker" rule is now structural — the controller's whole output is a render envelope.
+  - **The render half of `types/perf.ts` moved to `apps/web/src/render/perf.ts`** (12-ROADMAP §3 P3): a package cannot import a repo-root design file, and re-declaring a draw-call ceiling is how a ceiling stops being one. `READPATH` (P4) and `FAST_PREVIEW` (P5) stay behind with their own phases, so `types/perf.ts` is a **partial** stub — and it keeps the one compile proof that could not travel, 09 §7's tie between `PERF_TIERS.low.smoothBodyTarget` and `VERIFY.BODY_BUDGET`.
 - **2026-07-21 (Session 9, M8):** initial acceptance. D20 (perf budget + render-only adaptation + tiers + cap retained), D21 (read-path posture). `types/perf.ts` added. No changes to the scene format, engine constants, API, or DB schema — M8 is a budget and a strategy over the existing surface, by design (the only object-count-linear risks — thousands of ropes, real low-end wall times — are logged as U11/U25/U17, not new caps).

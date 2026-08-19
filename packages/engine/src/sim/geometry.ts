@@ -20,7 +20,7 @@
 
 import type { Id, ObjectType, Vec2 } from '@physics/scene-format';
 import type { BodyPiece } from '../protocol.js';
-import type { CanonicalObject, CanonicalScene } from './canonical.js';
+import type { CanonicalLink, CanonicalObject, CanonicalScene } from './canonical.js';
 import { DEG2RAD, datan2, dcos, dsin, length2 } from './dmath.js';
 
 /**
@@ -403,6 +403,40 @@ export function objectGeometry(obj: CanonicalObject): ObjectGeometry {
 /** Expand every object, in id order (DET-3). */
 export function sceneGeometry(scene: CanonicalScene): readonly ObjectGeometry[] {
   return scene.objects.map(objectGeometry);
+}
+
+function linkNum(link: CanonicalLink, key: string): number | undefined {
+  const v = (link.props as Readonly<Record<string, unknown>>)[key];
+  return typeof v === 'number' ? v : undefined;
+}
+
+/**
+ * How many dynamic bodies this scene expands to — the number `MAX_DYNAMIC_BODIES`
+ * caps and `E_LIMITS` reports.
+ *
+ * Counted before anything is built, so a scene over the cap fails with
+ * `E_LIMITS` instead of allocating its way there first — 8 000 bodies is exactly
+ * the size at which "build it, then check" is the wrong order.
+ *
+ * It lives here rather than beside `expand()` because it needs no physics build
+ * and two callers need it: the loader, and the builder's status bar (04 §14),
+ * which promises "the editor computes the exact expansion count" so `E_LIMITS`
+ * is never a surprise at Test. Exactness is only worth anything if it is the
+ * *same* count, so there is one function.
+ */
+export function countDynamicBodies(scene: CanonicalScene): number {
+  let n = 0;
+  for (const obj of scene.objects) {
+    if (obj.material.anchored) continue;
+    for (const piece of objectGeometry(obj).pieces) if (piece.kind === 'dynamic') n++;
+  }
+  for (const link of scene.links) {
+    if (link.type !== 'rope') continue;
+    const via = (link.props as { via?: readonly Id[] }).via ?? [];
+    const segments = linkNum(link, 'segments') ?? 0;
+    if (via.length === 0 && segments >= 2) n += segments;
+  }
+  return n;
 }
 
 // ---------------------------------------------------------------------------
